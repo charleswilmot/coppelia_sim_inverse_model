@@ -6,6 +6,7 @@ from collections import defaultdict
 from custom_shapes import TapShape, ButtonShape, LeverShape, Kuka
 import atexit
 import numpy as np
+from contextlib import contextmanager
 
 
 def communicate_return_value(method):
@@ -54,12 +55,21 @@ def consumer_to_producer_method_conversion(cls):
 
 def p2p_convertion_function(name):
     def new_method(self, *args, **kwargs):
-        return [
-            getattr(producer, name)(*args, **kwargs)
-            for producer in self._active_producers
-        ]
+        if self._distribute_args_mode:
+            # all args are iterables that must be distributed to each producer
+            return [
+                getattr(producer, name)(
+                    *[arg[i] for arg in args],
+                    **{key: value[i] for key, value in kwargs.items()}
+                )
+                for producer in enumerate(self._active_producers)
+            ]
+        else:
+            return [
+                getattr(producer, name)(*args, **kwargs)
+                for producer in self._active_producers
+            ]
     return new_method
-
 
 def producer_to_pool_method_convertion(cls):
     convertables = {
@@ -378,22 +388,21 @@ class SimulationPool:
             SimulationProducer(scene, gui=i in guis) for i in range(size)
         ]
         self._active_producers_indices = list(range(size))
+        self._distribute_args_mode = False
 
+    @contextmanager
     def specific(self, list_or_int):
-        class specific_context(object):
-            def __init__(context_self, list_or_int):
-                context_self._active_producers_indices_before = \
-                    self._active_producers_indices
-                self._active_producers_indices = \
-                    list_or_int if type(list_or_int) is list else [list_or_int]
+        _active_producers_indices_before = self._active_producers_indices
+        indices = list_or_int if type(list_or_int) is list else [list_or_int]
+        self._active_producers_indices = indices
+        yield
+        self._active_producers_indices = _active_producers_indices_before
 
-            def __enter__(context_self):
-                return context_self
-
-            def __exit__(context_self, type, value, traceback):
-                self._active_producers_indices = \
-                    context_self._active_producers_indices_before
-        return specific_context(list_or_int)
+    @contextmanager
+    def distribute_args(self):
+        self._distribute_args_mode = True
+        yield
+        self._distribute_args_mode = False
 
     def _get_active_producers(self):
         return [self._producers[i] for i in self._active_producers_indices]
@@ -485,13 +494,14 @@ if __name__ == '__main__':
     def test_4():
         import time
         pool_size = 1
-        simulations = SimulationPool(pool_size, guis=[])
+        simulations = SimulationPool(pool_size, guis=[0])
         # with simulations.same_argument_for_all():
         simulations.create_environment('one_arm_2_buttons_1_levers_1_tap')
         simulations.set_control_loop_enabled(False)
         simulations.start_sim()
-        upper_limits = simulations.get_joint_upper_velocity_limits()[0]
-        n_joints = simulations.get_n_joints()[0]
+        with simulations.specific(0):
+            upper_limits = simulations.get_joint_upper_velocity_limits()[0]
+            n_joints = simulations.get_n_joints()[0]
 
         N = 1000
 
