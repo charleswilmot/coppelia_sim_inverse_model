@@ -1,0 +1,74 @@
+agent:
+  policy_learning_rate: 1e-3
+  critic_learning_rate: 1e-3
+
+  policy_model_arch:
+    type: simple
+    layers:
+      id_0:
+        size: 200
+        activation: tf.nn.relu
+      id_1:
+        size: 200
+        activation: tf.nn.relu
+      id_2:
+        size: ${simulation.n_joints}
+        activation: tf.tanh
+  action_shape:
+    - ${simulation.n}
+    - ${simulation.n_joints}
+
+  critic_model_arch:
+    type: simple
+    layers:
+      id_0:
+        size: 400
+        activation: tf.nn.relu
+      id_1:
+        size: 400
+        activation: tf.nn.relu
+      id_2:
+        size: ${agent.prediction_time_window}
+        activation: tf.sigmoid
+
+  exploration:
+    type: ornstein_uhlenbeck
+    stddev: 0.2
+    damping: 0.025
+
+  prediction_time_window: 100
+
+
+policy_buffer:
+  size: 10000
+
+
+critic_buffer:
+  size: 10000
+
+
+simulation:
+  n: 1
+  guis:
+    - 0
+  environment: one_arm_2_buttons_1_levers_1_tap
+  n_joints: 7
+
+
+procedure:
+  episode_length: 1000
+  batch_size: 64
+  critic_updates_per_sample: 40
+  policy_updates_per_sample: 1
+  prediction_filter_lookup: 3
+  simulation_timestep: 0.2
+  visualize: True
+
+
+
+hydra:
+  run:
+    dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}/
+    subdir: job${hydra.job.num}

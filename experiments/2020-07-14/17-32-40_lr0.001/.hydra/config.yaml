@@ -1,0 +1,45 @@
+agent:
+  critic_model_arch:
+    layers:
+      id_0:
+        activation: tf.relu
+        size: 200
+      id_1:
+        activation: tf.relu
+        size: 200
+      id_2:
+        activation: tf.sigmoid
+        size: ${agent.prediction_time_window}
+    type: simple
+  exploration:
+    damping: 0.05
+    stddev: 0.2
+    type: ornstein_uhlenbeck
+  learning_rate: 0.001
+  policy_model_arch:
+    layers:
+      id_0:
+        activation: tf.relu
+        size: 200
+      id_1:
+        activation: tf.relu
+        size: 200
+      id_2:
+        activation: tf.sigmoid
+        size: ${simulation.n_joints}
+    type: simple
+  prediction_time_window: 500
+critic_buffer:
+  size: 10000
+policy_buffer:
+  size: 10000
+procedure:
+  batch_size: 512
+  critic_updates_per_sample: 4
+  episode_length: 2000
+  policy_updates_per_sample: 4
+  prediction_filter_lookup: 3
+simulation:
+  environment: one_arm_2_buttons_1_levers_1_tap
+  n: 1
+  n_joints: 7

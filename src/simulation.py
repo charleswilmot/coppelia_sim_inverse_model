@@ -4,13 +4,26 @@ import os
 from pathlib import Path
 from collections import defaultdict
 from custom_shapes import TapShape, ButtonShape, LeverShape, Kuka
-import atexit
 import numpy as np
 from contextlib import contextmanager
+from traceback import format_exc
+import time
+# import atexit
 
+
+MODEL_PATH = os.environ["COPPELIASIM_MODEL_PATH"]
+
+
+class SimulationConsumerFailed(Exception):
+    def __init__(self, consumer_exception, consumer_traceback):
+        self.consumer_exception = consumer_exception
+        self.consumer_traceback = consumer_traceback
+
+    def __str__(self):
+        return '\n\nFROM CONSUMER:\n\n{}'.format(self.consumer_traceback)
 
 def communicate_return_value(method):
-    """methode from the SimulationConsumer class decorated with this function
+    """method from the SimulationConsumer class decorated with this function
     will send there return value to the SimulationProducer class"""
     method._communicate_return_value = True
     return method
@@ -28,7 +41,13 @@ def c2p_convertion_function(cls, method):
     def new_method(self, *args, **kwargs):
         cls._send_command(self, method, *args, **kwargs)
         if method._communicate_return_value:
-            return self._process_io["return_value_pipe_out"].recv()
+            # print(method, "waiting for an answer...")
+            while not self._process_io["return_value_pipe_out"].poll(1):
+                # print(method, "waiting for an answer...nothing yet...alive?")
+                self._check_consumer_alive()
+            answer = self._process_io["return_value_pipe_out"].recv()
+            # print(method, "waiting for an answer...got it!")
+            return answer
     return new_method
 
 
@@ -62,7 +81,7 @@ def p2p_convertion_function(name):
                     *[arg[i] for arg in args],
                     **{key: value[i] for key, value in kwargs.items()}
                 )
-                for producer in enumerate(self._active_producers)
+                for i, producer in enumerate(self._active_producers)
             ]
         else:
             return [
@@ -108,23 +127,39 @@ class SimulationConsumerAbstract(mp.Process):
         self._process_io["simulaton_ready"].set()
         self._main_loop()
 
+    def _close_pipes(self):
+        self._process_io["command_pipe_out"].close()
+        self._process_io["return_value_pipe_in"].close()
+        # self._process_io["exception_pipe_in"].close() # let this one open
+
     def _main_loop(self):
-        while not self._process_io["must_quit"].is_set():
-            self._consume_command()
+        success = True
+        while success and not self._process_io["must_quit"].is_set():
+            success = self._consume_command()
         self._pyrep.shutdown()
+        self._close_pipes()
 
     def _consume_command(self):
-        command = self._process_io["command_pipe_out"].recv()
-        self._process_io["slot_in_command_queue"].release()
-        ret = command[0](self, *command[1], **command[2])
-        if command[0]._communicate_return_value:
-            self._communicate_return_value(ret)
+        try: # to execute the command and send result
+            success = True
+            command = self._process_io["command_pipe_out"].recv()
+            self._process_io["slot_in_command_queue"].release()
+            ret = command[0](self, *command[1], **command[2])
+            if command[0]._communicate_return_value:
+                self._communicate_return_value(ret)
+        except Exception as e: # print traceback, dont raise
+            traceback = format_exc()
+            success = False # return False: quit the main loop
+            self._process_io["exception_pipe_in"].send((e, traceback))
+        finally:
+            return success
 
     def _communicate_return_value(self, value):
         self._process_io["return_value_pipe_in"].send(value)
 
     def signal_command_pipe_empty(self):
         self._process_io["command_pipe_empty"].set()
+        time.sleep(0.1)
         self._process_io["command_pipe_empty"].clear()
 
     def good_bye(self):
@@ -138,17 +173,41 @@ class SimulationConsumer(SimulationConsumerAbstract):
         self._shapes = defaultdict(list)
         self._stateful_shape_list = []
         self._arm_list = []
+        self._state_buffer = None
+
+    def set_reset_poses(self):
+        self._reset_configuration_trees = [
+            arm.get_configuration_tree() for arm in self._arm_list
+        ]
+
+    @communicate_return_value
+    def reset(self, register_states):
+        for tree in self._reset_configuration_trees:
+            self._pyrep.set_configuration_tree(tree)
+        self.set_stateful_objects_states(register_states)
+        actions = np.random.uniform(size=self._n_joints, low=-1, high=1)
+        velocities = actions * self._upper_velocity_limits
+        self.set_joint_target_velocities(velocities)
+        self.step_sim() # three steps with a random velocity for randomization
+        self.step_sim()
+        self.step_sim()
+        return self._get_data()
+
+    def _get_stateful_objects_states(self):
+        for i, shape in enumerate(self._stateful_shape_list):
+            self._stateful_shape_state_buffer[i] = shape.get_state()
+        return self._stateful_shape_state_buffer
 
     @communicate_return_value
     def get_stateful_objects_states(self):
-        for i, shape in enumerate(self._stateful_shape_list):
-            self._stateful_shape_state_buffer[i] = shape.get_state()
-        # todo: return value must be communicated out of the process
-        return self._stateful_shape_state_buffer
+        return self._get_stateful_objects_states()
 
     def set_stateful_objects_states(self, states):
         if len(states) != len(self._stateful_shape_list):
-            raise ValueError("Can not set the object states, wrong length")
+            raise ValueError(
+            "Can not set the object states, wrong length ({} for {})".format(
+                len(states), len(self._stateful_shape_list))
+            )
         for shape, state in zip(self._stateful_shape_list, states):
             shape.set_state(state)
 
@@ -159,8 +218,53 @@ class SimulationConsumer(SimulationConsumerAbstract):
             dtype=np.uint8
         )
 
+    def _get_state(self):
+        n = self._n_joints
+        if self._state_buffer is None:
+            n_reg = self._get_n_registers()
+            size = 3 * n + n_reg
+            self._state_buffer = np.zeros(shape=size, dtype=np.float32)
+            self._state_mean = np.zeros(shape=size, dtype=np.float32)
+            self._state_std = np.zeros(shape=size, dtype=np.float32)
+            self._state_mean[3 * n:] = 0.5
+            # values measured from random movements
+            pos_std = [1.6, 1.3, 1.6, 1.3, 2.2, 1.7, 2.3]
+            spe_std = [1.1, 1.2, 1.4, 1.3, 2.4, 1.7, 2.1]
+            for_std = [91, 94, 43, 67, 12, 8.7, 2.3]
+            reg_std = [0.5 for i in range(n_reg)]
+            self._state_std[0 * n:1 * n] = np.tile(pos_std, n // 7)
+            self._state_std[1 * n:2 * n] = np.tile(spe_std, n // 7)
+            self._state_std[2 * n:3 * n] = np.tile(for_std, n // 7)
+            self._state_std[3 * n:] = reg_std
+        self._state_buffer[0 * n:1 * n] = self._get_joint_positions()
+        self._state_buffer[1 * n:2 * n] = self._get_joint_velocities()
+        self._state_buffer[2 * n:3 * n] = self._get_joint_forces()
+        self._state_buffer[3 * n:] = self._get_stateful_objects_states()
+        # STATE NORMALIZATION:
+        self._state_buffer -= self._state_mean
+        self._state_buffer /= self._state_std
+        return self._state_buffer
+
+    @communicate_return_value
+    def get_state(self):
+        return self._get_state()
+
+    def _get_data(self):
+        return self._get_state(), self._get_stateful_objects_states()
+
+    @communicate_return_value
+    def get_data(self):
+        return self._get_data()
+
+    def _get_n_registers(self):
+        return len(self._stateful_shape_list)
+
+    @communicate_return_value
+    def get_n_registers(self):
+        return self._get_n_registers()
+
     def add_tap(self, position=None, orientation=None):
-        model = self._pyrep.import_model("../3d_models/tap.ttm")
+        model = self._pyrep.import_model(MODEL_PATH + "/tap.ttm")
         model = TapShape(model.get_handle(), self._pyrep)
         if position is not None:
             model.set_position(position)
@@ -170,7 +274,7 @@ class SimulationConsumer(SimulationConsumerAbstract):
         self._add_stateful_object(model)
 
     def add_button(self, position=None, orientation=None):
-        model = self._pyrep.import_model("../3d_models/button.ttm")
+        model = self._pyrep.import_model(MODEL_PATH + "/button.ttm")
         model = ButtonShape(model.get_handle(), self._pyrep)
         if position is not None:
             model.set_position(position)
@@ -180,7 +284,7 @@ class SimulationConsumer(SimulationConsumerAbstract):
         self._add_stateful_object(model)
 
     def add_lever(self, position=None, orientation=None):
-        model = self._pyrep.import_model("../3d_models/lever.ttm")
+        model = self._pyrep.import_model(MODEL_PATH + "/lever.ttm")
         model = LeverShape(model.get_handle(), self._pyrep)
         if position is not None:
             model.set_position(position)
@@ -191,9 +295,9 @@ class SimulationConsumer(SimulationConsumerAbstract):
 
     def add_arm(self, position=None, orientation=None, from_tech_sheet=False):
         if from_tech_sheet:
-            model_file = "../3d_models/kuka_from_tech_sheet.ttm"
+            model_file = MODEL_PATH + "/kuka_from_tech_sheet.ttm"
         else:
-            model_file = "../3d_models/kuka_default.ttm"
+            model_file = MODEL_PATH + "/kuka_default.ttm"
         model = self._pyrep.import_model(model_file)
         model = Kuka(model.get_handle())
         if position is not None:
@@ -216,6 +320,7 @@ class SimulationConsumer(SimulationConsumerAbstract):
             self._n_joints,
             dtype=np.float32
         )
+        self._get_joint_upper_velocity_limits()
 
     def _get_joint_positions(self):
         last = 0
@@ -253,6 +358,13 @@ class SimulationConsumer(SimulationConsumerAbstract):
             arm.set_joint_target_velocities(velocities[last:next])
             last = next
 
+    @communicate_return_value
+    def apply_action(self, actions):
+        velocities = actions * self._upper_velocity_limits
+        self.set_joint_target_velocities(velocities)
+        self.step_sim()
+        return self._get_data()
+
     def set_control_loop_enabled(self, bool):
         for arm in self._arm_list:
             arm.set_control_loop_enabled(bool)
@@ -275,16 +387,24 @@ class SimulationConsumer(SimulationConsumerAbstract):
     def get_joint_forces(self):
         return self._get_joint_forces()
 
+    def set_joint_forces(self, forces):
+        last = 0
+        next = 0
+        for arm, joint_count in zip(self._arm_list, self._arm_joints_count):
+            next += joint_count
+            arm.set_joint_forces(forces[last:next])
+            last = next
+
     def _get_joint_upper_velocity_limits(self):
         last = 0
         next = 0
-        upper_velocity_limits = np.zeros(self._n_joints, dtype=np.float32)
+        self._upper_velocity_limits = np.zeros(self._n_joints, dtype=np.float32)
         for arm, joint_count in zip(self._arm_list, self._arm_joints_count):
             next += joint_count
-            upper_velocity_limits[last:next] = \
+            self._upper_velocity_limits[last:next] = \
                 arm.get_joint_upper_velocity_limits()
             last = next
-        return upper_velocity_limits
+        return self._upper_velocity_limits
 
     @communicate_return_value
     def get_joint_upper_velocity_limits(self):
@@ -328,8 +448,12 @@ class SimulationConsumer(SimulationConsumerAbstract):
     def stop_sim(self):
         self._pyrep.stop()
 
+    @communicate_return_value
     def get_simulation_timestep(self):
         return self._pyrep.get_simulation_timestep()
+
+    def set_simulation_timestep(self, dt):
+        self._pyrep.set_simulation_timestep(dt)
 
 
 
@@ -347,28 +471,44 @@ class SimulationProducer(object):
         pipe_out, pipe_in = mp.Pipe(duplex=False)
         self._process_io["return_value_pipe_in"] = pipe_in
         self._process_io["return_value_pipe_out"] = pipe_out
+        pipe_out, pipe_in = mp.Pipe(duplex=False)
+        self._process_io["exception_pipe_in"] = pipe_in
+        self._process_io["exception_pipe_out"] = pipe_out
         self._consumer = SimulationConsumer(self._process_io, scene, gui=gui)
         self._consumer.start()
         print("consumer {} started".format(self._consumer._id))
         self._process_io["simulaton_ready"].wait()
         self._closed = False
-        atexit.register(self.close)
+        # atexit.register(self.close)
 
     def _get_process_io(self):
         return self._process_io
 
+    def _check_consumer_alive(self):
+        if not self._consumer.is_alive():
+            self._consumer.join()
+            print("### My friend ({}) died ;( raising its exception: ###\n".format(self._consumer._id))
+            self._consumer.join()
+            self._closed = True
+            exc, traceback = self._process_io["exception_pipe_out"].recv()
+            raise SimulationConsumerFailed(exc, traceback)
+        return True
+
     def _send_command(self, function, *args, **kwargs):
         self._process_io["command_pipe_in"].send((function, args, kwargs))
-        self._process_io["slot_in_command_queue"].acquire()
+        semaphore = self._process_io["slot_in_command_queue"]
+        while not semaphore.acquire(block=False, timeout=0.1):
+            self._check_consumer_alive()
 
     def close(self):
         if not self._closed:
             # print("Producer closing")
-            self.wait_command_pipe_empty()
-            # print("command pipe empty, setting must_quit flag")
-            self._process_io["must_quit"].set()
-            # print("flushing command pipe")
-            self.good_bye()
+            if self._consumer.is_alive():
+                self.wait_command_pipe_empty()
+                # print("command pipe empty, setting must_quit flag")
+                self._process_io["must_quit"].set()
+                # print("flushing command pipe")
+                self.good_bye()
             self._closed = True
             # print("succesfully closed")
             self._consumer.join()
@@ -379,6 +519,9 @@ class SimulationProducer(object):
     def wait_command_pipe_empty(self):
         self._send_command(SimulationConsumer.signal_command_pipe_empty)
         self._process_io["command_pipe_empty"].wait()
+
+    def __del__(self):
+        self.close()
 
 
 @producer_to_pool_method_convertion
@@ -494,27 +637,35 @@ if __name__ == '__main__':
     def test_4():
         import time
         pool_size = 1
-        simulations = SimulationPool(pool_size, guis=[0])
-        # with simulations.same_argument_for_all():
+        simulations = SimulationPool(
+            pool_size,
+            scene=MODEL_PATH + '/custom_timestep.ttt',
+            guis=[0]
+        )
         simulations.create_environment('one_arm_2_buttons_1_levers_1_tap')
+        dt = 0.2
+        simulations.set_simulation_timestep(dt)
         simulations.set_control_loop_enabled(False)
         simulations.start_sim()
         with simulations.specific(0):
             upper_limits = simulations.get_joint_upper_velocity_limits()[0]
             n_joints = simulations.get_n_joints()[0]
 
-        N = 1000
+        N = 10000
 
-        frequencies = np.random.randint(low=100, high=150, size=n_joints)[np.newaxis]
+        frequencies = np.random.randint(
+            low=125 * dt, high=200 * dt, size=n_joints)[np.newaxis]
         x = np.arange(N)[:, np.newaxis]
         velocities = np.sin(x / frequencies * 2 * np.pi) * upper_limits
 
+        states = []
         t0 = time.time()
 
         for i in range(N):
             simulations.step_sim()
             simulations.set_joint_target_velocities(velocities[i])
             a = simulations.get_joint_forces()
+            states += simulations.get_state()
 
         t1 = time.time()
 
@@ -523,9 +674,58 @@ if __name__ == '__main__':
             t1 - t0,
             N * pool_size / (t1 - t0)
         ))
-
+        print('mean', np.mean(states, axis=0))
+        print('std', np.std(states, axis=0))
         simulations.stop_sim()
         simulations.close()
+
+    def test_5():
+        import matplotlib.pyplot as plt
+        import time
+        simulation = SimulationProducer(gui=True)
+        simulation.add_arm()
+        n_joints = simulation.get_n_joints()
+        simulation.set_control_loop_enabled(False)
+        simulation.start_sim()
+        simulation.step_sim()
+        timestep = simulation.get_simulation_timestep()
+        upper_limits = simulation.get_joint_upper_velocity_limits()
+        # max_forces = simulation.set_joint_forces([100 for i in range(n_joints)])
+        # max_forces = simulation.set_joint_forces([320, 320, 176, 176, 110, 40, 40])
+        simulation.step_sim()
+        max_forces = simulation.get_joint_forces()
+        print("timestep", timestep)
+        print(upper_limits)
+        print(upper_limits * 360 / 2 / np.pi)
+        print(max_forces)
+        joint_index = 0
+        # reset joint to min pos
+        velocities = [0] * n_joints
+        velocities[joint_index] = -upper_limits[joint_index]
+        simulation.set_joint_target_velocities(velocities)
+        for i in range(100):
+            simulation.step_sim()
+        # go full speed to max position
+        velocities[joint_index] = upper_limits[joint_index] * 1
+        simulation.set_joint_target_velocities(velocities)
+        positions = []
+        speeds = []
+        forces = []
+        for i in range(100):
+            simulation.step_sim()
+            pos = simulation.get_joint_positions()[joint_index]
+            spe = simulation.get_joint_velocities()[joint_index]
+            foc = simulation.get_joint_forces()[joint_index]
+            positions.append(pos)
+            speeds.append(spe)
+            forces.append(foc)
+        plt.plot(positions, 'b', label='position')
+        plt.plot(speeds, 'r', label='speed')
+        plt.plot(forces, 'g', label='forces')
+        plt.plot(np.full(len(speeds), upper_limits[joint_index]), 'k--', alpha=0.2, label='max speed')
+        plt.plot(np.full(len(speeds), velocities[joint_index]), 'r--', alpha=0.6, label='target speed')
+        plt.legend()
+        plt.show()
 
 
     test_4()
