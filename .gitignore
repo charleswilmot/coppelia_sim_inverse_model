@@ -129,3 +129,4 @@ dmypy.json
 .pyre/
 3d_models/old
 3d_models/blender_files
+experiments/
