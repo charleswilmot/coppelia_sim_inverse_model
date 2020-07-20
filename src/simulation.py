@@ -522,11 +522,22 @@ class SimulationProducer(object):
         while not semaphore.acquire(block=False, timeout=0.1):
             self._check_consumer_alive()
 
+    def _wait_for_answer(self):
+        while not self._process_io["return_value_pipe_out"].poll(1):
+            # print(method, "waiting for an answer...nothing yet...alive?")
+            self._check_consumer_alive()
+        answer = self._process_io["return_value_pipe_out"].recv()
+        # print(method, "waiting for an answer...got it!")
+        return answer
+
+    def _wait_consumer_ready(self):
+        self._process_io["simulaton_ready"].wait()
+
     def close(self):
         if not self._closed:
             # print("Producer closing")
             if self._consumer.is_alive():
-                self.wait_command_pipe_empty()
+                self._wait_command_pipe_empty()
                 # print("command pipe empty, setting must_quit flag")
                 self._process_io["must_quit"].set()
                 # print("flushing command pipe")
@@ -538,7 +549,7 @@ class SimulationProducer(object):
         else:
             print("{} already closed, doing nothing".format(self._consumer._id))
 
-    def wait_command_pipe_empty(self):
+    def _wait_command_pipe_empty(self):
         self._send_command(SimulationConsumer.signal_command_pipe_empty)
         self._process_io["command_pipe_empty"].wait()
 
@@ -675,7 +686,7 @@ if __name__ == '__main__':
             guis=[0]
         )
         simulations.create_environment('one_arm_2_buttons_1_levers_1_tap')
-        dt = 0.2
+        dt = 0.05
         simulations.set_simulation_timestep(dt)
         simulations.set_control_loop_enabled(False)
         simulations.start_sim()
@@ -685,10 +696,11 @@ if __name__ == '__main__':
 
         N = 10000
 
-        frequencies = np.random.randint(
-            low=125 * dt, high=200 * dt, size=n_joints)[np.newaxis]
+        periods_in_sec = np.random.randint(
+            low=2, high=10, size=n_joints)[np.newaxis]
+        periods = periods_in_sec / dt
         x = np.arange(N)[:, np.newaxis]
-        velocities = np.sin(x / frequencies * 2 * np.pi) * upper_limits
+        velocities = np.sin(x / periods * 2 * np.pi) * upper_limits
 
         states = []
         t0 = time.time()
@@ -759,5 +771,73 @@ if __name__ == '__main__':
         plt.legend()
         plt.show()
 
+    def test_6():
+        pool_size = 1
+        simulations = SimulationPool(
+            pool_size,
+            scene=MODEL_PATH + '/custom_timestep.ttt',
+            guis=[0]
+        )
+        simulations.create_environment('one_arm_2_buttons_1_levers_1_tap')
+        dt = 0.2
+        simulations.set_simulation_timestep(dt)
+        simulations.set_control_loop_enabled(False)
+        simulations.start_sim()
+        with simulations.specific(0):
+            n_joints = simulations.get_n_joints()[0]
 
-    test_4()
+        N = 1000
+
+        actions = np.random.uniform(low=-1, high=1, size=(N, n_joints * 4))
+
+        states = []
+        t0 = time.time()
+
+        for action in actions:
+            simulations.apply_movement(action, span=10, mode="cubic_hermite")
+
+        t1 = time.time()
+
+        print("{} iteration in {:.3f} sec ({:.3f} it/sec)".format(
+            N * pool_size,
+            t1 - t0,
+            N * pool_size / (t1 - t0)
+        ))
+        simulations.stop_sim()
+        simulations.close()
+
+    def test_7(pool_size):
+        simulations = SimulationPool(
+            pool_size,
+            scene=MODEL_PATH + '/custom_timestep.ttt',
+            guis=[]
+        )
+        simulations.create_environment('one_arm_2_buttons_1_levers_1_tap')
+        dt = 0.2
+        simulations.set_simulation_timestep(dt)
+        simulations.set_control_loop_enabled(False)
+        simulations.start_sim()
+        with simulations.specific(0):
+            n_joints = simulations.get_n_joints()[0]
+
+        N = 720 // pool_size
+
+        actions = np.random.uniform(low=-1, high=1, size=(N, n_joints))
+
+        t0 = time.time()
+
+        for i, action in enumerate(actions):
+            print(i)
+            simulations.apply_movement(action, span=10, mode="minimalist")
+
+        t1 = time.time()
+
+        print("{} iteration in {:.3f} sec ({:.3f} it/sec)".format(
+            N * pool_size,
+            t1 - t0,
+            N * pool_size / (t1 - t0)
+        ))
+        simulations.stop_sim()
+        simulations.close()
+
+    test_7(6)
