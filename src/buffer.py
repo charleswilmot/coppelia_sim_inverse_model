@@ -39,7 +39,7 @@ class Buffer(object):
             else: # enough empty space
                 return slice(self.current_last, self.current_last + n)
         else: # buffer already full
-            return np.random.choice(np.arange(self.size), n, replace=False)
+            return np.random.choice(self.size, n, replace=False)
 
     def sample(self, batch_size):
         if self.current_last < batch_size or batch_size > self.size:
