@@ -55,7 +55,12 @@ class Agent(object):
         pure_actions = self.policy_model(states, goals)
         if exploration:
             noises = self.get_noise()
-            noisy_actions = pure_actions + noises
+            noisy_actions = tf.clip_by_value(
+                pure_actions + noises,
+                clip_value_min=-1,
+                clip_value_max=1
+            )
+            noises = noisy_actions - pure_actions
             return pure_actions, noisy_actions, noises
         else:
             return pure_actions
