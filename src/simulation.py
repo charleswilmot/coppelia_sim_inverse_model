@@ -125,6 +125,7 @@ class SimulationConsumerAbstract(mp.Process):
         self._scene = scene
         self._gui = gui
         self._process_io = process_io
+        np.random.seed()
 
     def run(self):
         self._pyrep = PyRep()
