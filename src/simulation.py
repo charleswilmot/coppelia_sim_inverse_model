@@ -8,7 +8,7 @@ import numpy as np
 from contextlib import contextmanager
 from traceback import format_exc
 import time
-# import atexit
+from scipy.interpolate import CubicHermiteSpline
 
 
 MODEL_PATH = os.environ["COPPELIASIM_MODEL_PATH"]
@@ -320,7 +320,8 @@ class SimulationConsumer(SimulationConsumerAbstract):
             self._n_joints,
             dtype=np.float32
         )
-        self._get_joint_upper_velocity_limits()
+        self._previous_hermite_speeds = np.zeros(self._n_joints)
+        self._previous_hermite_accelerations = np.zeros(self._n_joints)
 
     def _get_joint_positions(self):
         last = 0
@@ -364,6 +365,41 @@ class SimulationConsumer(SimulationConsumerAbstract):
         self.set_joint_target_velocities(velocities)
         self.step_sim()
         return self._get_data()
+
+    @communicate_return_value
+    def apply_movement(self, actions, mode='minimalist', span=10):
+        if mode == 'minimalist':
+            ramp = 0.5 - 0.5 * np.cos(np.linspace(0, 2 * np.pi, span))
+            velocities = \
+                actions[np.newaxis] * \
+                ramp[:, np.newaxis] * \
+                self._upper_velocity_limits[np.newaxis]
+            for velocity in velocities:
+                self.set_joint_target_velocities(velocity)
+                self.step_sim()
+        elif mode == "cubic_hermite":
+            x = [0, 0.5, 1]
+            actions_speeds = actions[:2 * self._n_joints]
+            actions_speeds = actions_speeds.reshape(
+                (2, self._n_joints))
+            actions_accelerations = actions[2 * self._n_joints:]
+            actions_accelerations = actions_accelerations.reshape(
+                (2, self._n_joints))
+            speeds = np.vstack([self._previous_hermite_speeds, actions_speeds])
+            accelerations = np.vstack([self._previous_hermite_accelerations, actions_accelerations])
+            speeds[-1] *= 0.5
+            accelerations[-1] *= 0.5
+            eval = np.linspace(0, 1, span)
+            poly = CubicHermiteSpline(x, speeds, accelerations)
+            velocities = poly(eval) * self._upper_velocity_limits[np.newaxis]
+            self._previous_hermite_speeds = speeds[-1]
+            self._previous_hermite_accelerations = accelerations[-1]
+            for velocity in velocities:
+                self.set_joint_target_velocities(velocity)
+                self.step_sim()
+        else:
+            raise ValueError("Unrecognized movement mode ({})".format(mode))
+        return self.get_data()
 
     def set_control_loop_enabled(self, bool):
         for arm in self._arm_list:
