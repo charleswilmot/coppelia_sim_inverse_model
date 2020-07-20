@@ -201,16 +201,13 @@ class SimulationConsumer(SimulationConsumerAbstract):
         self.step_sim() # three steps with a random velocity for randomization
         self.step_sim()
         self.step_sim()
-        return self._get_data()
-
-    def _get_stateful_objects_states(self):
-        for i, shape in enumerate(self._stateful_shape_list):
-            self._stateful_shape_state_buffer[i] = shape.get_state()
-        return self._stateful_shape_state_buffer
+        return self.get_data()
 
     @communicate_return_value
     def get_stateful_objects_states(self):
-        return self._get_stateful_objects_states()
+        for i, shape in enumerate(self._stateful_shape_list):
+            self._stateful_shape_state_buffer[i] = shape.get_state()
+        return self._stateful_shape_state_buffer
 
     def set_stateful_objects_states(self, states):
         if len(states) != len(self._stateful_shape_list):
@@ -228,16 +225,17 @@ class SimulationConsumer(SimulationConsumerAbstract):
             dtype=np.uint8
         )
 
-    def _get_state(self):
+    @communicate_return_value
+    def get_state(self):
         n = self._n_joints
         if self._state_buffer is None:
-            n_reg = self._get_n_registers()
+            n_reg = self.get_n_registers()
             size = 3 * n + n_reg
             self._state_buffer = np.zeros(shape=size, dtype=np.float32)
             self._state_mean = np.zeros(shape=size, dtype=np.float32)
             self._state_std = np.zeros(shape=size, dtype=np.float32)
             self._state_mean[3 * n:] = 0.5
-            # values measured from random movements
+            # scaling with values measured from random movements
             pos_std = [1.6, 1.3, 1.6, 1.3, 2.2, 1.7, 2.3]
             spe_std = [1.1, 1.2, 1.4, 1.3, 2.4, 1.7, 2.1]
             for_std = [91, 94, 43, 67, 12, 8.7, 2.3]
@@ -246,32 +244,22 @@ class SimulationConsumer(SimulationConsumerAbstract):
             self._state_std[1 * n:2 * n] = np.tile(spe_std, n // 7)
             self._state_std[2 * n:3 * n] = np.tile(for_std, n // 7)
             self._state_std[3 * n:] = reg_std
-        self._state_buffer[0 * n:1 * n] = self._get_joint_positions()
-        self._state_buffer[1 * n:2 * n] = self._get_joint_velocities()
-        self._state_buffer[2 * n:3 * n] = self._get_joint_forces()
-        self._state_buffer[3 * n:] = self._get_stateful_objects_states()
+        self._state_buffer[0 * n:1 * n] = self.get_joint_positions()
+        self._state_buffer[1 * n:2 * n] = self.get_joint_velocities()
+        self._state_buffer[2 * n:3 * n] = self.get_joint_forces()
+        self._state_buffer[3 * n:] = self.get_stateful_objects_states()
         # STATE NORMALIZATION:
         self._state_buffer -= self._state_mean
         self._state_buffer /= self._state_std
         return self._state_buffer
 
     @communicate_return_value
-    def get_state(self):
-        return self._get_state()
-
-    def _get_data(self):
-        return self._get_state(), self._get_stateful_objects_states()
-
-    @communicate_return_value
     def get_data(self):
-        return self._get_data()
-
-    def _get_n_registers(self):
-        return len(self._stateful_shape_list)
+        return self.get_state(), self.get_stateful_objects_states()
 
     @communicate_return_value
     def get_n_registers(self):
-        return self._get_n_registers()
+        return len(self._stateful_shape_list)
 
     def add_tap(self, position=None, orientation=None):
         model = self._pyrep.import_model(MODEL_PATH + "/tap.ttm")
@@ -332,8 +320,10 @@ class SimulationConsumer(SimulationConsumerAbstract):
         )
         self._previous_hermite_speeds = np.zeros(self._n_joints)
         self._previous_hermite_accelerations = np.zeros(self._n_joints)
+        self.get_joint_upper_velocity_limits()
 
-    def _get_joint_positions(self):
+    @communicate_return_value
+    def get_joint_positions(self):
         last = 0
         next = 0
         for arm, joint_count in zip(self._arm_list, self._arm_joints_count):
@@ -344,10 +334,7 @@ class SimulationConsumer(SimulationConsumerAbstract):
         return self._arm_joints_positions_buffer
 
     @communicate_return_value
-    def get_joint_positions(self):
-        return self._get_joint_positions()
-
-    def _get_joint_velocities(self):
+    def get_joint_velocities(self):
         last = 0
         next = 0
         for arm, joint_count in zip(self._arm_list, self._arm_joints_count):
@@ -356,10 +343,6 @@ class SimulationConsumer(SimulationConsumerAbstract):
                 arm.get_joint_velocities()
             last = next
         return self._arm_joints_velocities_buffer
-
-    @communicate_return_value
-    def get_joint_velocities(self):
-        return self._get_joint_velocities()
 
     def set_joint_target_velocities(self, velocities):
         last = 0
@@ -374,7 +357,7 @@ class SimulationConsumer(SimulationConsumerAbstract):
         velocities = actions * self._upper_velocity_limits
         self.set_joint_target_velocities(velocities)
         self.step_sim()
-        return self._get_data()
+        return self.get_data()
 
     @communicate_return_value
     def apply_movement(self, actions, mode='minimalist', span=10):
@@ -419,7 +402,8 @@ class SimulationConsumer(SimulationConsumerAbstract):
         for arm in self._arm_list:
             arm.set_motor_locked_at_zero_velocity(bool)
 
-    def _get_joint_forces(self):
+    @communicate_return_value
+    def get_joint_forces(self):
         last = 0
         next = 0
         for arm, joint_count in zip(self._arm_list, self._arm_joints_count):
@@ -429,10 +413,6 @@ class SimulationConsumer(SimulationConsumerAbstract):
             last = next
         return self._arm_joints_torques_buffer
 
-    @communicate_return_value
-    def get_joint_forces(self):
-        return self._get_joint_forces()
-
     def set_joint_forces(self, forces):
         last = 0
         next = 0
@@ -441,7 +421,8 @@ class SimulationConsumer(SimulationConsumerAbstract):
             arm.set_joint_forces(forces[last:next])
             last = next
 
-    def _get_joint_upper_velocity_limits(self):
+    @communicate_return_value
+    def get_joint_upper_velocity_limits(self):
         last = 0
         next = 0
         self._upper_velocity_limits = np.zeros(self._n_joints, dtype=np.float32)
@@ -451,10 +432,6 @@ class SimulationConsumer(SimulationConsumerAbstract):
                 arm.get_joint_upper_velocity_limits()
             last = next
         return self._upper_velocity_limits
-
-    @communicate_return_value
-    def get_joint_upper_velocity_limits(self):
-        return self._get_joint_upper_velocity_limits()
 
     @communicate_return_value
     def get_n_joints(self):
