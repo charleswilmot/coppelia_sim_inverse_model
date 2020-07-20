@@ -500,7 +500,6 @@ class SimulationProducer(object):
         self._consumer = SimulationConsumer(self._process_io, scene, gui=gui)
         self._consumer.start()
         print("consumer {} started".format(self._consumer._id))
-        self._process_io["simulaton_ready"].wait()
         self._closed = False
         # atexit.register(self.close)
 
@@ -555,6 +554,7 @@ class SimulationPool:
         ]
         self._active_producers_indices = list(range(size))
         self._distribute_args_mode = False
+        self.wait_consumer_ready()
 
     @contextmanager
     def specific(self, list_or_int):
@@ -573,6 +573,15 @@ class SimulationPool:
     def _get_active_producers(self):
         return [self._producers[i] for i in self._active_producers_indices]
     _active_producers = property(_get_active_producers)
+
+    def close(self):
+        for producer in self._producers:
+            producer.close()
+
+    def wait_consumer_ready(self):
+        for producer in self._producers:
+            producer._wait_consumer_ready()
+
 
 
 if __name__ == '__main__':
