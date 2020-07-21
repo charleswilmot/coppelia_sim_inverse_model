@@ -163,7 +163,7 @@ class Procedure(object):
         with self.summary_writer.as_default():
             hp.hparams(self._hparams)
 
-    def log_summaries(self):
+    def log_summaries(self, critic=True, policy=True):
         with self.summary_writer.as_default():
             training_critic_metric_list = [
                 self.tb_training_critic_loss,
@@ -182,34 +182,36 @@ class Procedure(object):
                 self.tb_collection_policy_success_rate_percent,
                 self.tb_collection_policy_discoveries_per_ep,
             ]
-            for metric in training_critic_metric_list:
-                tf.summary.scalar(
-                    metric.name,
-                    metric.result(),
-                    step=self.n_critic_training
-                )
-                metric.reset_states()
-            for metric in collection_critic_metric_list:
-                tf.summary.scalar(
-                    metric.name,
-                    metric.result(),
-                    step=self.n_critic_episodes
-                )
-                metric.reset_states()
-            for metric in training_policy_metric_list:
-                tf.summary.scalar(
-                    metric.name,
-                    metric.result(),
-                    step=self.n_policy_episodes
-                )
-                metric.reset_states()
-            for metric in collection_policy_metric_list:
-                tf.summary.scalar(
-                    metric.name,
-                    metric.result(),
-                    step=self.n_policy_episodes
-                )
-                metric.reset_states()
+            if critic:
+                for metric in training_critic_metric_list:
+                    tf.summary.scalar(
+                        metric.name,
+                        metric.result(),
+                        step=self.n_critic_episodes
+                    )
+                    metric.reset_states()
+                for metric in collection_critic_metric_list:
+                    tf.summary.scalar(
+                        metric.name,
+                        metric.result(),
+                        step=self.n_critic_episodes
+                    )
+                    metric.reset_states()
+            if policy:
+                for metric in training_policy_metric_list:
+                    tf.summary.scalar(
+                        metric.name,
+                        metric.result(),
+                        step=self.n_policy_episodes
+                    )
+                    metric.reset_states()
+                for metric in collection_policy_metric_list:
+                    tf.summary.scalar(
+                        metric.name,
+                        metric.result(),
+                        step=self.n_policy_episodes
+                    )
+                    metric.reset_states()
 
     def _get_n_episodes(self):
         return self.n_policy_episodes + self.n_critic_episodes
@@ -475,7 +477,7 @@ class Procedure(object):
         if policy:
             self.gather_and_train_policy()
         if self.n_critic_episodes % 1 == 0:
-            self.log_summaries()
+            self.log_summaries(critic=critic, policy=policy)
 
     def evaluate(self):
         """Evaluates the current model"""
