@@ -2,7 +2,7 @@ import hydra
 from procedure import Procedure
 
 
-@hydra.main(config_path='../config/default.yml', strict=True)
+@hydra.main(config_path='../config/default.yaml', strict=True)
 def main(cfg):
     experiment(cfg)
 

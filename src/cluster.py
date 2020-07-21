@@ -14,7 +14,7 @@ PASSWORD = None
 REMOTE_HOST_NAME = 'otto'
 
 
-@hydra.main(config_path='../config/default.yml', strict=True)
+@hydra.main(config_path='../config/default.yaml', strict=True)
 def start_job(cfg):
         experiment_path = os.getcwd()
         pickle_conf_path = experiment_path + '/cfg.json'
