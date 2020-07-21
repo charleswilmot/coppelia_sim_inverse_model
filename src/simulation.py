@@ -1,4 +1,5 @@
 from pyrep import PyRep
+from pyrep.objects import VisionSensor
 import multiprocessing as mp
 import os
 from pathlib import Path
@@ -184,6 +185,7 @@ class SimulationConsumer(SimulationConsumerAbstract):
         self._stateful_shape_list = []
         self._arm_list = []
         self._state_buffer = None
+        self._cams = {}
 
     def set_reset_poses(self):
         self._reset_configuration_trees = [
@@ -321,6 +323,25 @@ class SimulationConsumer(SimulationConsumerAbstract):
         self._previous_hermite_speeds = np.zeros(self._n_joints)
         self._previous_hermite_accelerations = np.zeros(self._n_joints)
         self.get_joint_upper_velocity_limits()
+
+    @communicate_return_value
+    def add_camera(self, position=None, orientation=None, resolution=[320, 240]):
+        vision_sensor = VisionSensor.create(
+            resolution=resolution,
+            position=position,
+            orientation=orientation,
+        )
+        cam_id = vision_sensor.get_handle()
+        self._cams[cam_id] = vision_sensor
+        return cam_id
+
+    @communicate_return_value
+    def get_frame(self, cam_id):
+        return self._cams[cam_id].capture_rgb()
+
+    def delete_camera(self, cam_id):
+        self._cams[cam_id].remove()
+        self._cams.pop(cam_id)
 
     @communicate_return_value
     def get_joint_positions(self):
