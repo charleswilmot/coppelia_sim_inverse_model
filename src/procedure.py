@@ -371,7 +371,6 @@ class Procedure(object):
             n_discoveries
         )
 
-
     def get_data(self):
         states, current_goals = tuple(zip(*self.simulation_pool.get_data()))
         return np.vstack(states), np.vstack(current_goals)
@@ -449,9 +448,9 @@ class Procedure(object):
         )
         index_visualize = np.argmin(failed_episode) # index sucess episode if any
         if self._visualization is not None:
-            self._visualization(
+            self._visualization.update_critic(
                 target=cliped_integer_targets[:, index_visualize],
-                prediction=integer_predictions[:, index_visualize]
+                prediction=integer_predictions[:, index_visualize],
             )
 
     def train_policy(self):
