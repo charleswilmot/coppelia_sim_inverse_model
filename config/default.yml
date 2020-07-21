@@ -33,10 +33,10 @@ agent:
 
   exploration:
     type: ornstein_uhlenbeck
-    stddev: 0.2
-    damping: 0.025
+    stddev: 0.1
+    damping: 0.9
 
-  prediction_time_window: 100
+  prediction_time_window: 25
 
 
 policy_buffer:
@@ -48,27 +48,37 @@ critic_buffer:
 
 
 simulation:
-  n: 1
+  n: 20
   guis:
-    - 0
+    -
   environment: one_arm_2_buttons_1_levers_1_tap
   n_joints: 7
 
 
 procedure:
-  episode_length: 1000
+  episode_length: 100
   batch_size: 64
   critic_updates_per_sample: 40
-  policy_updates_per_sample: 1
+  policy_updates_per_sample: 40
   prediction_filter_lookup: 3
   simulation_timestep: 0.2
-  visualize: True
+  visualize: False
+  movement_mode: minimalist
+  movement_span_in_sec: 2
+  her_lookup: 4
 
 
 
 hydra:
   run:
-    dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}_${hydra.job.override_dirname}
   sweep:
     dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}/
-    subdir: job${hydra.job.num}
+    subdir: job${hydra.job.num}_${hydra.job.override_dirname}
+  job:
+    config:
+      # configuration for the ${hydra.job.override_dirname} runtime variable
+      override_dirname:
+        kv_sep: '.'
+        item_sep: '__'
+        exclude_keys: []
