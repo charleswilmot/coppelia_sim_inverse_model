@@ -6,6 +6,7 @@ from tensorflow.keras.metrics import Mean
 import tensorflow as tf
 import time
 from visualization import Visualization
+from tensorboard.plugins.hparams import api as hp
 
 
 class Procedure(object):
