@@ -20,11 +20,16 @@ class Procedure(object):
         self.policy_updates_per_sample = procedure_conf.policy_updates_per_sample
         self.batch_size = procedure_conf.batch_size
         self.n_simulations = simulation_conf.n
-        self.prediction_filter_lookup = procedure_conf.prediction_filter_lookup
-        self.prediction_filter = np.array([1] + [
-            -1 / self.prediction_filter_lookup
-            for i in range(self.prediction_filter_lookup)
-        ], dtype=np.float32)
+        self.movement_mode = procedure_conf.movement_mode
+        self.movement_span = int(procedure_conf.movement_span_in_sec / \
+                                 procedure_conf.simulation_timestep)
+        self.movement_modes = [
+            self.movement_mode for i in range(self.n_simulations)
+        ]
+        self.movement_spans = [
+            self.movement_span for i in range(self.n_simulations)
+        ]
+        self.her_lookup = procedure_conf.her_lookup
         #    HPARAMS
         self._hparams = OrderedDict([
             ("policy_LR", agent_conf.policy_learning_rate),
@@ -374,7 +379,11 @@ class Procedure(object):
     def apply_action(self, actions):
         with self.simulation_pool.distribute_args():
             states, current_goals = \
-                tuple(zip(*self.simulation_pool.apply_action(actions)))
+                tuple(zip(*self.simulation_pool.apply_movement(
+                    actions,
+                    mode=self.movement_modes,
+                    span=self.movement_spans
+                )))
         return np.vstack(states), np.vstack(current_goals)
 
     def gather_critic_data(self):
