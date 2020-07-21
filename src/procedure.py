@@ -6,6 +6,7 @@ from tensorflow.keras.metrics import Mean
 import tensorflow as tf
 import time
 from visualization import Visualization
+from collections import OrderedDict
 from tensorboard.plugins.hparams import api as hp
 from imageio import get_writer
 
@@ -87,12 +88,7 @@ class Procedure(object):
             ("states", np.float32, self.state_size),
             ("goals", np.float32, self.goal_size),
             ("current_goals", np.float32, self.goal_size),
-            ("pure_actions", np.float32, self.action_size),
             ("noisy_actions", np.float32, self.action_size),
-            ("noises", np.float32, self.action_size),
-            ("predictions", np.float32, self.prediction_size),
-            # ("targets", np.float32, self.prediction_size), # TODO: DELETE
-            # ("integer_targets", np.int16),
             ("_simulator_index", np.int16)
         ])
         self._policy_data_buffer = np.zeros(
@@ -321,14 +317,10 @@ class Procedure(object):
         for iteration in range(self.episode_length):
             pure_actions, noisy_actions, noises = self.agent.get_actions(
                 states, goals, exploration=True)
-            predictions = self.agent.get_predictions(states, goals)
             self._policy_data_buffer[iteration]["states"] = states
             self._policy_data_buffer[iteration]["goals"] = goals
             self._policy_data_buffer[iteration]["current_goals"] = current_goals
-            self._policy_data_buffer[iteration]["pure_actions"] = pure_actions
             self._policy_data_buffer[iteration]["noisy_actions"] = noisy_actions
-            self._policy_data_buffer[iteration]["noises"] = noises.numpy()
-            self._policy_data_buffer[iteration]["predictions"] = predictions
             states, current_goals = self.apply_action(noisy_actions)
         # SELECT TRANSITIONS TO BE ADDED TO THE REPLAY BUFFER
         integer_predictions = self._convert_to_integers(
