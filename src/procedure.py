@@ -324,19 +324,31 @@ class Procedure(object):
             self._policy_data_buffer[iteration]["current_goals"] = current_goals
             self._policy_data_buffer[iteration]["noisy_actions"] = noisy_actions
             states, current_goals = self.apply_action(noisy_actions)
-        # SELECT TRANSITIONS TO BE ADDED TO THE REPLAY BUFFER
-        integer_predictions = self._convert_to_integers(
-            self._policy_data_buffer["predictions"])
-        advantages = np.apply_along_axis(
-            lambda x: np.convolve(x, self.prediction_filter, mode='valid'),
-            axis=0,
-            arr=integer_predictions
-        ) - (self.prediction_filter_lookup + 1) / 2
-        where = advantages > 0
-        self.policy_buffer.integrate(
-            self._policy_data_buffer[:-self.prediction_filter_lookup][where]
-        )
-        n_discoveries = np.sum(where)
+        # HINDSIGHT EXPERIENCE
+        register_change = (
+            self._policy_data_buffer["current_goals"][:-1] !=
+            self._policy_data_buffer["current_goals"][1:]
+        ).any(axis=-1)
+        if register_change.any():
+            simulation_indices, iteration_indices = register_change.T.nonzero()
+            for_hindsight = []
+            prev_iteration = 0
+            prev_simulation = 0
+            for iteration, simulation in zip(iteration_indices, simulation_indices):
+                if simulation != prev_simulation:
+                    prev_iteration = 0
+                start = max(0, prev_iteration, iteration - self.her_lookup)
+                stop = iteration
+                prev_iteration = iteration
+                prev_simulation = simulation
+                copy = self._policy_data_buffer[start:stop, simulation]
+                copy["goals"] = self._policy_data_buffer["goals"][stop + 1, simulation]
+                for_hindsight.append(copy)
+            hindsight_data = np.concatenate(for_hindsight)
+            self.policy_buffer.integrate(hindsight_data)
+            n_discoveries = len(hindsight_data)
+        else:
+            n_discoveries = 0
         self.n_policy_transition_gathered += n_discoveries
         self.n_policy_episodes += self.n_simulations
         time_stop = time.time()
