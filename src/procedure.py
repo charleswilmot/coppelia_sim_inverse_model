@@ -22,6 +22,24 @@ class Procedure(object):
             -1 / self.prediction_filter_lookup
             for i in range(self.prediction_filter_lookup)
         ], dtype=np.float32)
+        #    HPARAMS
+        self._hparams = OrderedDict([
+            ("policy_LR", agent_conf.policy_learning_rate),
+            ("critic_LR", agent_conf.critic_learning_rate),
+            ("policy_buffer", policy_buffer_conf.size),
+            ("critic_buffer", critic_buffer_conf.size),
+            ("policy_update_rate", procedure_conf.policy_updates_per_sample),
+            ("critic_update_rate", procedure_conf.critic_updates_per_sample),
+            ("pred_lookup", agent_conf.prediction_time_window),
+            ("ep_length", procedure_conf.episode_length),
+            ("batch_size", procedure_conf.batch_size),
+            ("noise_type", agent_conf.exploration.type),
+            ("noise_std", agent_conf.exploration.stddev),
+            ("noise_damp", agent_conf.exploration.damping),
+            ("movement_mode", procedure_conf.movement_mode),
+            ("movement_span", procedure_conf.movement_span_in_sec),
+            ("her_lookup", procedure_conf.her_lookup),
+        ])
         if procedure_conf.visualize:
             self._visualization = Visualization(
                 mini=0,
@@ -143,6 +161,8 @@ class Procedure(object):
             dtype=tf.float32
         )
         self.summary_writer = tf.summary.create_file_writer("logs")
+        with self.summary_writer.as_default():
+            hp.hparams(self._hparams)
 
     def log_summaries(self):
         with self.summary_writer.as_default():
