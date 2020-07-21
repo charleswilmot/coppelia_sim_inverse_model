@@ -1,0 +1,15 @@
+path: ???
+n_episodes: 10
+gui: False
+record: True
+exploration: False
+resolution:
+  - 320
+  - 240
+
+hydra:
+  run:
+    dir: ${path}/../../replays
+  sweep:
+    dir: ${hydra.run.dir}
+    subdir: ""
