@@ -40,6 +40,7 @@ class Procedure(object):
             ("movement_span", procedure_conf.movement_span_in_sec),
             ("her_lookup", procedure_conf.her_lookup),
         ])
+        #   VISUALIZATION
         if procedure_conf.visualize:
             self._visualization = Visualization(
                 mini=0,
