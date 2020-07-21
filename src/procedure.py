@@ -7,6 +7,7 @@ import tensorflow as tf
 import time
 from visualization import Visualization
 from tensorboard.plugins.hparams import api as hp
+from imageio import get_writer
 
 
 class Procedure(object):
@@ -271,6 +272,45 @@ class Procedure(object):
             states, current_goals = \
                 tuple(zip(*self.simulation_pool.reset(goals)))
         return np.vstack(states), np.vstack(current_goals)
+
+    def replay(self, exploration=False, record=False, n_episodes=10,
+            video_name='replay.mp4', resolution=[320, 240]):
+        """Applies the current policy in the environment"""
+        with self.simulation_pool.specific(0):
+            if record:
+                writer = get_writer(video_name)
+                cam_id = self.simulation_pool.add_camera(
+                    position=(1, 1, 1),
+                    orientation=(
+                        24 * np.pi / 36,
+                        -7 * np.pi / 36,
+                         4 * np.pi / 36
+                    ),
+                    resolution=resolution
+                )[0]
+            for i in range(n_episodes):
+                goals = self.sample_goals()
+                states, current_goals = self.reset_simulations()
+                for iteration in range(self.episode_length):
+                    frame = self.simulation_pool.get_frame(cam_id)[0]
+                    frame = (frame * 255).astype(np.uint8)
+                    if record:
+                        writer.append_data(frame)
+                        if iteration == 0:
+                            for i in range(24):
+                                writer.append_data(frame)
+                    if exploration:
+                        _, noisy_actions, _ = self.agent.get_actions(
+                            states, goals, exploration=True)
+                        states, current_goals = self.apply_action(noisy_actions)
+                    else:
+                        pure_actions = self.agent.get_actions(
+                            states, goals, exploration=False)
+                        states, current_goals = self.apply_action(pure_actions)
+                    # print("success?", (current_goals == goals).all())
+            if record:
+                writer.close()
+                self.simulation_pool.delete_camera(cam_id)
 
     def gather_policy_data(self):
         """Performs one episode of exploration, places data in the policy
