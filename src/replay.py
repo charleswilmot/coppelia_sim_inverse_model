@@ -10,7 +10,7 @@ def get_conf():
     return cfg
 
 
-@hydra.main(config_path="../config/replay.yaml", strict=True)
+@hydra.main(config_path="../config/replay/replay.yaml", strict=True)
 def replay(cfg):
     experiment_cfg = get_conf()
     agent_conf = experiment_cfg.agent
