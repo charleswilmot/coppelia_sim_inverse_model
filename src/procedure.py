@@ -249,9 +249,9 @@ class Procedure(object):
         path = "./checkpoints/{:08d}".format(self.n_episodes)
         self.agent.save_weights(path)
 
-    def restore(self, n_episodes):
+    def restore(self, path):
         """Restores the weights from a checkpoint"""
-        self.agent.load_weights("./checkpoints/{:08d}".format(n_episodes))
+        self.agent.load_weights(path)
 
     def sample_goals(self):
         """Returns a binary vector corresponding to the goal states of the
