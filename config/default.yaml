@@ -1,23 +1,8 @@
 agent:
   policy_learning_rate: 1e-3
   critic_learning_rate: 1e-3
-
-  policy_model_arch:
-    type: simple
-    layers:
-      id_0:
-        size: 200
-        activation: tf.nn.relu
-      id_1:
-        size: 200
-        activation: tf.nn.relu
-      id_2:
-        size: ${simulation.n_joints}
-        activation: tf.tanh
-  action_shape:
-    - ${simulation.n}
-    - ${simulation.n_joints}
-
+  prediction_time_window: 25
+  policy_model_arch: narrow_shallow
   critic_model_arch:
     type: simple
     layers:
@@ -31,12 +16,13 @@ agent:
         size: ${agent.prediction_time_window}
         activation: tf.sigmoid
 
+  action_shape:
+    - ${simulation.n}
+    - ${simulation.n_joints}
   exploration:
     type: ornstein_uhlenbeck
     stddev: 0.1
     damping: 0.9
-
-  prediction_time_window: 25
 
 
 policy_buffer:
