@@ -5,6 +5,7 @@ from simulation import SimulationPool, MODEL_PATH
 from tensorflow.keras.metrics import Mean
 import tensorflow as tf
 import time
+import os
 from visualization import Visualization
 from collections import OrderedDict
 from tensorboard.plugins.hparams import api as hp
@@ -167,6 +168,8 @@ class Procedure(object):
         self.summary_writer = tf.summary.create_file_writer("logs")
         with self.summary_writer.as_default():
             hp.hparams(self._hparams)
+        # TREE STRUCTURE
+        os.makedirs('./replays', exist_ok=True)
 
     def log_summaries(self, critic=True, policy=True):
         with self.summary_writer.as_default():

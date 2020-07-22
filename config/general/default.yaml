@@ -67,6 +67,14 @@ procedure:
   her_lookup: 4
 
 
+experiment:
+  n_episodes: 8000
+  policy_every: 1
+  critic_every: 5
+  record_episode_every: 10
+  save_every: 100
+  final_recording: True
+
 
 hydra:
   run:
