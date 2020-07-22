@@ -254,7 +254,7 @@ class Procedure(object):
 
     def save(self):
         """Saves the model in the appropriate directory"""
-        path = "./checkpoints/{:08d}".format(self.n_episodes)
+        path = "./checkpoints/{:08d}".format(self.n_policy_episodes)
         self.agent.save_weights(path)
 
     def restore(self, path):
@@ -318,6 +318,31 @@ class Procedure(object):
                 writer.close()
                 self.simulation_pool.delete_camera(cam_id)
 
+    def _get_hindsight_data(self, buffer):
+        register_change = (
+            buffer["current_goals"][:-1] !=
+            buffer["current_goals"][1:]
+        ).any(axis=-1)
+        if register_change.any():
+            simulation_indices, iteration_indices = register_change.T.nonzero()
+            for_hindsight = []
+            prev_iteration = 0
+            prev_simulation = 0
+            for iteration, simulation in zip(iteration_indices, simulation_indices):
+                if simulation != prev_simulation:
+                    prev_iteration = 0
+                # start = max(0, prev_iteration, iteration - self.her_lookup)
+                start = max(0, iteration - self.her_lookup)
+                stop = iteration
+                prev_iteration = iteration
+                prev_simulation = simulation
+                copy = np.copy(buffer[start:stop, simulation])
+                copy["goals"] = buffer["current_goals"][stop + 1, simulation]
+                for_hindsight.append(copy)
+            return for_hindsight
+        else:
+            return [np.zeros(0, dtype=buffer.dtype)]
+
     def gather_policy_data(self):
         """Performs one episode of exploration, places data in the policy
         buffer"""
@@ -333,31 +358,35 @@ class Procedure(object):
             self._policy_data_buffer[iteration]["noisy_actions"] = noisy_actions
             states, current_goals = self.apply_action(noisy_actions)
         # HINDSIGHT EXPERIENCE
-        register_change = (
-            self._policy_data_buffer["current_goals"][:-1] !=
-            self._policy_data_buffer["current_goals"][1:]
-        ).any(axis=-1)
-        if register_change.any():
-            simulation_indices, iteration_indices = register_change.T.nonzero()
-            for_hindsight = []
-            prev_iteration = 0
-            prev_simulation = 0
-            for iteration, simulation in zip(iteration_indices, simulation_indices):
-                if simulation != prev_simulation:
-                    prev_iteration = 0
-                start = max(0, prev_iteration, iteration - self.her_lookup)
-                # start = max(0, iteration - self.her_lookup)
-                stop = iteration
-                prev_iteration = iteration
-                prev_simulation = simulation
-                copy = np.copy(self._policy_data_buffer[start:stop, simulation])
-                copy["goals"] = self._policy_data_buffer["current_goals"][stop + 1, simulation]
-                for_hindsight.append(copy)
-            hindsight_data = np.concatenate(for_hindsight)
-            self.policy_buffer.integrate(hindsight_data)
-            n_discoveries = len(hindsight_data)
-        else:
-            n_discoveries = 0
+        for_hindsight = self._get_hindsight_data(self._policy_data_buffer)
+        hindsight_data = np.concatenate(for_hindsight)
+        self.policy_buffer.integrate(hindsight_data)
+        n_discoveries = len(hindsight_data)
+        # register_change = (
+        #     self._policy_data_buffer["current_goals"][:-1] !=
+        #     self._policy_data_buffer["current_goals"][1:]
+        # ).any(axis=-1)
+        # if register_change.any():
+        #     simulation_indices, iteration_indices = register_change.T.nonzero()
+        #     for_hindsight = []
+        #     prev_iteration = 0
+        #     prev_simulation = 0
+        #     for iteration, simulation in zip(iteration_indices, simulation_indices):
+        #         if simulation != prev_simulation:
+        #             prev_iteration = 0
+        #         # start = max(0, prev_iteration, iteration - self.her_lookup)
+        #         start = max(0, iteration - self.her_lookup)
+        #         stop = iteration
+        #         prev_iteration = iteration
+        #         prev_simulation = simulation
+        #         copy = np.copy(self._policy_data_buffer[start:stop, simulation])
+        #         copy["goals"] = self._policy_data_buffer["current_goals"][stop + 1, simulation]
+        #         for_hindsight.append(copy)
+        #     hindsight_data = np.concatenate(for_hindsight)
+        #     self.policy_buffer.integrate(hindsight_data)
+        #     n_discoveries = len(hindsight_data)
+        # else:
+        #     n_discoveries = 0
         self.n_policy_transition_gathered += n_discoveries
         self.n_policy_episodes += self.n_simulations
         time_stop = time.time()
@@ -425,6 +454,16 @@ class Procedure(object):
                 integer_target = self._critic_data_buffer["integer_targets"][i, j]
                 self._critic_data_buffer["targets"][i, j, integer_target:] = 1
         self.critic_buffer.integrate(self._critic_data_buffer)
+        # HINDSIGHT EXPERIENCE REPLAY
+        for_hindsight = self._get_hindsight_data(self._critic_data_buffer)
+        for hinsight_part in for_hindsight:
+            for i, data in enumerate(reversed(hinsight_part)):
+                data["integer_targets"] = i
+                data["targets"][:i] = 0
+                data["targets"][i:] = 1
+        hindsight_data = np.concatenate(for_hindsight)
+        self.critic_buffer.integrate(hindsight_data)
+        #
         self.n_critic_transition_gathered += self.episode_length * self.n_simulations
         self.n_critic_episodes += self.n_simulations
         time_stop = time.time()
