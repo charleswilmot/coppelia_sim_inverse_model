@@ -346,11 +346,12 @@ class Procedure(object):
                 if simulation != prev_simulation:
                     prev_iteration = 0
                 start = max(0, prev_iteration, iteration - self.her_lookup)
+                # start = max(0, iteration - self.her_lookup)
                 stop = iteration
                 prev_iteration = iteration
                 prev_simulation = simulation
-                copy = self._policy_data_buffer[start:stop, simulation]
-                copy["goals"] = self._policy_data_buffer["goals"][stop + 1, simulation]
+                copy = np.copy(self._policy_data_buffer[start:stop, simulation])
+                copy["goals"] = self._policy_data_buffer["current_goals"][stop + 1, simulation]
                 for_hindsight.append(copy)
             hindsight_data = np.concatenate(for_hindsight)
             self.policy_buffer.integrate(hindsight_data)
