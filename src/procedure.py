@@ -261,10 +261,11 @@ class Procedure(object):
         """Restores the weights from a checkpoint"""
         self.agent.load_weights(path)
 
-    def sample_goals(self):
+    def sample_goals(self, n=None):
+        n = self.n_simulations if n is None else n
         """Returns a binary vector corresponding to the goal states of the
         actuators in the simulation for each simulation"""
-        return np.random.randint(2, size=(self.n_simulations, self.goal_size))
+        return np.random.randint(2, size=(n, self.goal_size))
 
     def _convert_to_integers(self, predictions, mode="sum"):
         if mode == "sum":
@@ -295,7 +296,7 @@ class Procedure(object):
                     resolution=resolution
                 )[0]
             for i in range(n_episodes):
-                goals = self.sample_goals()
+                goals = self.sample_goals(1)
                 states, current_goals = self.reset_simulations()
                 for iteration in range(self.episode_length):
                     frame = self.simulation_pool.get_frame(cam_id)[0]
