@@ -1,5 +1,9 @@
 import hydra
 from procedure import Procedure
+import os
+
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
 @hydra.main(config_path='../config/general/default.yaml', strict=True)
@@ -25,7 +29,7 @@ def experiment(cfg):
             record = (episode_batch + 1) % experiment_conf.record_episode_every == 0
             print_info = (episode_batch + 1) % 10 == 0
             print("batch {: 5d}\tpolicy:{}\tcritic:{}\tsave:{}\trecord:{}".format(
-                episode_batch,
+                episode_batch + 1,
                 policy,
                 critic,
                 save,
@@ -38,7 +42,8 @@ def experiment(cfg):
                 procedure.replay(
                     record=True,
                     video_name='./replays/replay_{:05d}.mp4'.format(episode_batch),
-                    n_episodes=1
+                    n_episodes=1,
+                    exploration=False
                 )
             if print_info:
                 print('n_policy_transition_gathered...', procedure.n_policy_transition_gathered)
@@ -55,14 +60,7 @@ def experiment(cfg):
                 record=True,
                 video_name='./replays/replay_final.mp4',
                 n_episodes=10,
-                explore=False
-            )
-            print("Generating final recording (with exploration)")
-            procedure.replay(
-                record=True,
-                video_name='./replays/replay_final_exploration.mp4',
-                n_episodes=10,
-                explore=True
+                exploration=False
             )
         print("Experiment finished, hope it worked. Good bye!")
 
