@@ -8,6 +8,7 @@ from socket import gethostname
 import sys
 from collections import defaultdict
 import json
+import time
 
 
 PASSWORD = None
@@ -25,6 +26,7 @@ def start_job(cfg):
         output_flag = "--output {outdir}/%N_%j.joblog".format(outdir=experiment_path)
         job_name_flag = "--job-name {job_name}".format(job_name=job_name)
         partition_flag = "--partition {partition}".format(partition="sleuths")
+        time.sleep(5)
         reservation_flag = next_reservation()
         os.chdir(get_original_cwd())
         command_line = "sbatch {output_flag} {job_name_flag} {partition_flag} {reservation_flag} cluster.sh ".format(
