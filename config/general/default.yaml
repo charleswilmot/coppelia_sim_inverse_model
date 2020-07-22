@@ -47,7 +47,7 @@ critic_buffer:
 
 
 simulation:
-  n: 20
+  n: 40
   guis:
     -
   environment: one_arm_2_buttons_1_levers_1_tap
