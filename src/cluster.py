@@ -35,7 +35,7 @@ def start_job(cfg):
             partition_flag=partition_flag,
             reservation_flag=reservation_flag,
         ) + command_line_args
-        print(command_line)
+        print(command_line, flush=True)
         os.system(command_line)
 
 
@@ -43,6 +43,14 @@ def get_n_free_cpus(node):
     cpusstate = os.popen('sinfo -h --nodes {} -O cpusstate'.format(node)).read()
     cpusstate = cpusstate.split("/")
     return int(cpusstate[1])
+
+
+def get_n_free_gpus(node):
+    total = os.popen("sinfo -h -p sleuths -n {} -O gres".format(node)).read()
+    total = int(total.split(":")[-1])
+    used = os.popen("squeue -h -w {} -O gres".format(node)).read()
+    used = len(used.strip("\n").split("\n"))
+    return total - used
 
 
 def node_to_n_jobs():
@@ -68,17 +76,22 @@ def reservation_to_n_jobs():
 def next_reservation():
     nodes_used = node_to_n_jobs()
     reservations = reservation_to_n_jobs()
-    free_cpus = {node: get_n_free_cpus(node) for node in ["jetski", "turbine", "vane"]}
-    for node, free in free_cpus.items():
-        if free >= 27:
-            if node == 'jetski':
-                return "--reservation triesch-shared"
-            else:
-                return ""
-    if reservations["triesch-shared"] * 5 < reservations["(null)"] * 4:
-        return "--reservation triesch-shared"
+    nodes = ["jetski", "turbine", "vane"]
+    free_cpus = {node: get_n_free_cpus(node) for node in nodes}
+    free_gpus = {node: get_n_free_gpus(node) for node in nodes}
+    for node in nodes:
+        cpus = free_cpus[node]
+        gpus = free_gpus[node]
+        print(node, "free cpus:", cpus, "free gpus:", gpus)
+    reservation = ""
+    if free_cpus["jetski"] >= 10 and free_gpus["jetski"] > 0:
+        reservation = "--reservation triesch-shared"
+    if reservations["triesch-shared"] * 2 < reservations["(null)"]:
+        reservation = "--reservation triesch-shared"
     else:
-        return ""
+        reservation = ""
+    print("reservation: ", reservation)
+    return reservation
 
 
 def additional_args():
