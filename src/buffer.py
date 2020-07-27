@@ -1,3 +1,4 @@
+import pickle
 import numpy as np
 
 
@@ -10,6 +11,10 @@ class Buffer(object):
         }
         self.dtype = None
         self.sample_index = 0
+
+    def dump(self, path):
+        with open(path, "wb") as f:
+            pickle.dump(self.buffer, f)
 
     def integrate(self, data):
         if self.dtype is None: # must create buffer and dtype

@@ -171,6 +171,13 @@ class Procedure(object):
         # TREE STRUCTURE
         os.makedirs('./replays', exist_ok=True)
 
+    def dump_buffers(self):
+        os.makedirs('./buffers', exist_ok=True)
+        path = "./buffers/critic_{:6d}.pkl".format(self.n_critic_training)
+        self.critic_buffer.dump(path)
+        path = "./buffers/policy_{:6d}.pkl".format(self.n_policy_training)
+        self.policy_buffer.dump(path)
+
     def log_summaries(self, critic=True, policy=True):
         with self.summary_writer.as_default():
             training_critic_metric_list = [
