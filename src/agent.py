@@ -26,6 +26,8 @@ class Agent(object):
         self.exploration_damping = exploration.damping
         self.ou_process = None
         self._action_shape = action_shape.to_container(resolve=True)
+        #   OTHER PARAMS
+        self.prediction_time_window = prediction_time_window
 
     def save_weights(self, path):
         self.policy_model.save_weights(path + "/policy_model")
@@ -67,7 +69,10 @@ class Agent(object):
 
     @tf.function
     def get_predictions(self, states, goals, logits=False):
-        return self.critic_model(states, goals, logits=logits)
+        batch_size = tf.shape(states)[0]
+        ret = self.critic_model(states, goals, logits=logits)
+        ret = tf.reshape(ret, (batch_size, self.prediction_time_window, -1))
+        return ret
 
     @tf.function
     def train_critic(self, states, goals, targets):
