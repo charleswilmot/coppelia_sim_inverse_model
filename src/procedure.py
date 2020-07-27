@@ -12,6 +12,19 @@ from tensorboard.plugins.hparams import api as hp
 from imageio import get_writer
 
 
+def _rec_expected_time(probs, t=1):
+    if not probs.shape[-1]:
+        return t
+    else:
+        return t * probs[..., 0] + \
+               (1 - probs[..., 0]) * _rec_expected_time(probs[..., 1:], t=t+1)
+
+
+def get_time_prediction(prediction, goal):
+    probs = np.prod(2 * goal * prediction + 1 - goal - prediction, axis=-1)
+    return _rec_expected_time(probs)
+
+
 class Procedure(object):
     def __init__(self, agent_conf, policy_buffer_conf, critic_buffer_conf,
             simulation_conf, procedure_conf):
@@ -30,7 +43,8 @@ class Procedure(object):
         self.movement_spans = [
             self.movement_span for i in range(self.n_simulations)
         ]
-        self.her_lookup = procedure_conf.her_lookup
+        self.prediction_time_window = agent_conf.prediction_time_window
+        self.pessimism = procedure_conf.pessimism
         #    HPARAMS
         self._hparams = OrderedDict([
             ("policy_LR", agent_conf.policy_learning_rate),
@@ -47,7 +61,6 @@ class Procedure(object):
             ("noise_damp", agent_conf.exploration.damping),
             ("movement_mode", procedure_conf.movement_mode),
             ("movement_span", procedure_conf.movement_span_in_sec),
-            ("her_lookup", procedure_conf.her_lookup),
         ])
         #   VISUALIZATION
         if procedure_conf.visualize:
@@ -81,7 +94,10 @@ class Procedure(object):
             self.goal_size = self.simulation_pool.get_n_registers()[0]
             self.state_size = self.simulation_pool.get_state()[0].shape[0]
             self.action_size = self.simulation_pool.get_n_joints()[0]
-            self.prediction_size = agent_conf.prediction_time_window
+            self.prediction_size = (
+                agent_conf.prediction_time_window,
+                simulation_conf.n_register
+            )
 
         print("self.goal_size", self.goal_size)
         print("self.state_size", self.state_size)
@@ -94,7 +110,9 @@ class Procedure(object):
             ("states", np.float32, self.state_size),
             ("goals", np.float32, self.goal_size),
             ("current_goals", np.float32, self.goal_size),
+            ("pure_actions", np.float32, self.action_size),
             ("noisy_actions", np.float32, self.action_size),
+            ("predictions", np.float32, self.prediction_size),
             ("_simulator_index", np.int16)
         ])
         self._policy_data_buffer = np.zeros(
@@ -111,7 +129,6 @@ class Procedure(object):
             ("pure_actions", np.float32, self.action_size),
             ("predictions", np.float32, self.prediction_size),
             ("targets", np.float32, self.prediction_size),
-            ("integer_targets", np.int16),
             ("_simulator_index", np.int16)
         ])
         self._critic_data_buffer = np.zeros(
@@ -145,12 +162,8 @@ class Procedure(object):
             "collection/critic_it_per_sec",
             dtype=tf.float32
         )
-        self.tb_collection_critic_mean_prediction_error = Mean(
-            "collection/critic_mean_prediction_error",
-            dtype=tf.float32
-        )
-        self.tb_collection_critic_mean_prediction = Mean(
-            "collection/critic_mean_prediction",
+        self.tb_collection_critic_mean_abs_prediction_error = Mean(
+            "collection/critic_mean_abs_prediction_error",
             dtype=tf.float32
         )
         self.tb_collection_critic_success_rate_percent = Mean(
@@ -163,6 +176,42 @@ class Procedure(object):
         )
         self.tb_collection_policy_discoveries_per_ep = Mean(
             "collection/policy_discoveries_per_ep",
+            dtype=tf.float32
+        )
+        self.tb_collection_policy_mean_abs_prediction_error_it = Mean(
+            "collection/policy_mean_abs_prediction_error_it",
+            dtype=tf.float32
+        )
+        self.tb_collection_policy_goal_diversity = Mean(
+            "collection/policy_goal_diversity",
+            dtype=tf.float32
+        )
+        self.tb_collection_policy_delta_distance_to_goal = Mean(
+            "collection/policy_delta_distance_to_goal",
+            dtype=tf.float32
+        )
+        self.tb_collection_policy_n_register_change = Mean(
+            "collection/policy_n_register_change",
+            dtype=tf.float32
+        )
+        self.tb_collection_critic_mean_abs_prediction_error_it = Mean(
+            "collection/critic_mean_abs_prediction_error_it",
+            dtype=tf.float32
+        )
+        self.tb_collection_critic_one_away_sucess_rate = Mean(
+            "collection/critic_one_away_sucess_rate",
+            dtype=tf.float32
+        )
+        self.tb_collection_critic_goal_diversity = Mean(
+            "collection/critic_goal_diversity",
+            dtype=tf.float32
+        )
+        self.tb_collection_critic_delta_distance_to_goal = Mean(
+            "collection/critic_delta_distance_to_goal",
+            dtype=tf.float32
+        )
+        self.tb_collection_critic_n_register_change = Mean(
+            "collection/critic_n_register_change",
             dtype=tf.float32
         )
         self.summary_writer = tf.summary.create_file_writer("logs")
@@ -185,9 +234,13 @@ class Procedure(object):
             ]
             collection_critic_metric_list = [
                 self.tb_collection_critic_it_per_sec,
-                self.tb_collection_critic_mean_prediction_error,
-                self.tb_collection_critic_mean_prediction,
+                self.tb_collection_critic_mean_abs_prediction_error,
                 self.tb_collection_critic_success_rate_percent,
+                self.tb_collection_critic_mean_abs_prediction_error_it,
+                self.tb_collection_critic_one_away_sucess_rate,
+                self.tb_collection_critic_goal_diversity,
+                self.tb_collection_critic_delta_distance_to_goal,
+                self.tb_collection_critic_n_register_change,
             ]
             training_policy_metric_list = [
                 self.tb_training_policy_loss,
@@ -196,6 +249,10 @@ class Procedure(object):
                 self.tb_collection_policy_it_per_sec,
                 self.tb_collection_policy_success_rate_percent,
                 self.tb_collection_policy_discoveries_per_ep,
+                self.tb_collection_policy_mean_abs_prediction_error_it,
+                self.tb_collection_policy_goal_diversity,
+                self.tb_collection_policy_delta_distance_to_goal,
+                self.tb_collection_policy_n_register_change,
             ]
             if critic:
                 for metric in training_critic_metric_list:
@@ -274,12 +331,6 @@ class Procedure(object):
         actuators in the simulation for each simulation"""
         return np.random.randint(2, size=(n, self.goal_size))
 
-    def _convert_to_integers(self, predictions, mode="sum"):
-        if mode == "sum":
-            return predictions.shape[-1] - np.sum(predictions, axis=-1)
-        else:
-            raise ValueError("Unrecognized convertion mode ({})".format(mode))
-
     def reset_simulations(self):
         goals = self.sample_goals()
         with self.simulation_pool.distribute_args():
@@ -326,31 +377,6 @@ class Procedure(object):
                 writer.close()
                 self.simulation_pool.delete_camera(cam_id)
 
-    def _get_hindsight_data(self, buffer):
-        register_change = (
-            buffer["current_goals"][:-1] !=
-            buffer["current_goals"][1:]
-        ).any(axis=-1)
-        if register_change.any():
-            simulation_indices, iteration_indices = register_change.T.nonzero()
-            for_hindsight = []
-            prev_iteration = 0
-            prev_simulation = 0
-            for iteration, simulation in zip(iteration_indices, simulation_indices):
-                if simulation != prev_simulation:
-                    prev_iteration = 0
-                # start = max(0, prev_iteration, iteration - self.her_lookup)
-                start = max(0, iteration - self.her_lookup)
-                stop = iteration
-                prev_iteration = iteration
-                prev_simulation = simulation
-                copy = np.copy(buffer[start:stop, simulation])
-                copy["goals"] = buffer["current_goals"][stop + 1, simulation]
-                for_hindsight.append(copy)
-            return for_hindsight
-        else:
-            return [np.zeros(0, dtype=buffer.dtype)]
-
     def gather_policy_data(self):
         """Performs one episode of exploration, places data in the policy
         buffer"""
@@ -363,38 +389,68 @@ class Procedure(object):
             self._policy_data_buffer[iteration]["states"] = states
             self._policy_data_buffer[iteration]["goals"] = goals
             self._policy_data_buffer[iteration]["current_goals"] = current_goals
+            self._policy_data_buffer[iteration]["pure_actions"] = pure_actions
             self._policy_data_buffer[iteration]["noisy_actions"] = noisy_actions
             states, current_goals = self.apply_action(noisy_actions)
         # HINDSIGHT EXPERIENCE
-        for_hindsight = self._get_hindsight_data(self._policy_data_buffer)
-        hindsight_data = np.concatenate(for_hindsight)
-        self.policy_buffer.integrate(hindsight_data)
-        n_discoveries = len(hindsight_data)
-        # register_change = (
-        #     self._policy_data_buffer["current_goals"][:-1] !=
-        #     self._policy_data_buffer["current_goals"][1:]
-        # ).any(axis=-1)
-        # if register_change.any():
-        #     simulation_indices, iteration_indices = register_change.T.nonzero()
-        #     for_hindsight = []
-        #     prev_iteration = 0
-        #     prev_simulation = 0
-        #     for iteration, simulation in zip(iteration_indices, simulation_indices):
-        #         if simulation != prev_simulation:
-        #             prev_iteration = 0
-        #         # start = max(0, prev_iteration, iteration - self.her_lookup)
-        #         start = max(0, iteration - self.her_lookup)
-        #         stop = iteration
-        #         prev_iteration = iteration
-        #         prev_simulation = simulation
-        #         copy = np.copy(self._policy_data_buffer[start:stop, simulation])
-        #         copy["goals"] = self._policy_data_buffer["current_goals"][stop + 1, simulation]
-        #         for_hindsight.append(copy)
-        #     hindsight_data = np.concatenate(for_hindsight)
-        #     self.policy_buffer.integrate(hindsight_data)
-        #     n_discoveries = len(hindsight_data)
-        # else:
-        #     n_discoveries = 0
+        register_change = (
+            self._policy_data_buffer["current_goals"][:-1] !=
+            self._policy_data_buffer["current_goals"][1:]
+        ).any(axis=-1)
+        iteration_indices = {
+            i: changes.nonzero()[0]
+            for i, changes in enumerate(register_change.T) if changes.any()
+        }
+        for_hindsight = []
+        prediction_error_sum = 0
+        prediction_error_n = 0
+        for simulation, changes in iteration_indices.items():
+            for iteration in range(self._policy_data_buffer.shape[0]):
+                next = np.argmax(changes > iteration)
+                if next or changes[0] > iteration:
+                    for transition_index in changes[next:]:
+                        state = self._policy_data_buffer["states"][iteration, simulation]
+                        actual_goal = self._policy_data_buffer["current_goals"][transition_index + 1, simulation]
+                        prediction = self.agent.get_predictions(
+                            state[np.newaxis],
+                            actual_goal[np.newaxis]).numpy()[0]
+                        prediction = get_time_prediction(
+                            prediction,              # 10, 4
+                            actual_goal[np.newaxis]  #  1, 4
+                        )
+                        truth = transition_index - iteration
+                        prediction_error_sum += np.abs(prediction - np.clip(truth, 0, self.prediction_time_window))
+                        prediction_error_n += 1
+                        prediction = int(prediction)
+                        if truth < prediction * (1 - self.pessimism):
+                            print("YES: sim:{:2d} it:{:2d}  took me {:2d} steps to go from {} to {} at {:2d}, I predicted {:2d} ({:.3f})".format(
+                                simulation,
+                                iteration,
+                                truth,
+                                self._policy_data_buffer["current_goals"][transition_index, simulation],
+                                actual_goal,
+                                transition_index,
+                                prediction,
+                                prediction * (1 - self.pessimism)))
+                            copy = np.copy(self._policy_data_buffer[iteration, simulation])
+                            copy["goals"] = actual_goal
+                            for_hindsight.append(copy)
+                        else:
+                            print("NO : sim:{:2d} it:{:2d}  took me {:2d} steps to go from {} to {} at {:2d}, I predicted {:2d} ({:.3f})".format(
+                                simulation,
+                                iteration,
+                                truth,
+                                self._policy_data_buffer["current_goals"][transition_index, simulation],
+                                actual_goal,
+                                transition_index,
+                                prediction,
+                                prediction * (1 - self.pessimism)))
+        if len(for_hindsight):
+            hindsight_data = np.vstack(for_hindsight)
+            self.policy_buffer.integrate(hindsight_data)
+            n_discoveries = len(hindsight_data)
+        else:
+            n_discoveries = 0
         self.n_policy_transition_gathered += n_discoveries
         self.n_policy_episodes += self.n_simulations
         time_stop = time.time()
@@ -410,6 +466,31 @@ class Procedure(object):
         )
         self.tb_collection_policy_discoveries_per_ep(
             n_discoveries
+        )
+        if prediction_error_n:
+            self.tb_collection_policy_mean_abs_prediction_error_it(
+                prediction_error_sum / prediction_error_n
+            )
+        n_uniques = 0
+        for simulation in range(self.n_simulations):
+            episode = self._policy_data_buffer["current_goals"][:, simulation]
+            n_uniques += len(np.unique(episode, axis=0))
+        self.tb_collection_policy_goal_diversity(
+            n_uniques / self.n_simulations
+        )
+        distance_at_start = np.sqrt(np.sum((
+            self._policy_data_buffer["current_goals"][0] -
+            self._policy_data_buffer["goals"][0]
+        ) ** 2, axis=-1))
+        distance_at_end = np.sqrt(np.sum((
+            self._policy_data_buffer["current_goals"][-1] -
+            self._policy_data_buffer["goals"][-1]
+        ) ** 2, axis=-1))
+        self.tb_collection_policy_delta_distance_to_goal(
+            np.mean(distance_at_start - distance_at_end)
+        )
+        self.tb_collection_policy_n_register_change(
+            np.mean(np.sum(register_change, axis=0))
         )
 
     def get_data(self):
@@ -443,65 +524,114 @@ class Procedure(object):
             self._critic_data_buffer[iteration]["predictions"] = predictions
             states, current_goals = self.apply_action(pure_actions)
         # COMPLETE THE BUFFER WITH THE PREDICTION TARGETS
-        bootstraping_predictions = self.agent.get_predictions(states, goals)
-        prev = self._convert_to_integers(bootstraping_predictions)
-        goal_missed = (
-            self._critic_data_buffer["goals"] != \
+        ptw = self.prediction_time_window
+        for i in range(self.prediction_time_window):
+            self._critic_data_buffer["targets"][:-ptw - 1, :, i] = \
+                self._critic_data_buffer["current_goals"][i + 1:i + self.episode_length - ptw]
+        valid_part_of_buffer = self._critic_data_buffer[:-ptw - 1]
+        goal_reached = (
+            self._critic_data_buffer["goals"] == \
             self._critic_data_buffer["current_goals"]
-        ).any(axis=-1)
-        failed_episode = goal_missed.all(axis=0)
-        prev[failed_episode] = self.prediction_size
-        self._critic_data_buffer["integer_targets"] = 0
-        for i in range(self.episode_length - 1, -1, -1):
-            prev = (prev + 1) * goal_missed[i]
-            self._critic_data_buffer[i]["integer_targets"] = prev
-        # CONVERT INTEGER TO TARGET
-        self._critic_data_buffer["targets"] = 0
-        for i in range(self.episode_length):
-            for j in range(self.n_simulations):
-                integer_target = self._critic_data_buffer["integer_targets"][i, j]
-                self._critic_data_buffer["targets"][i, j, integer_target:] = 1
-        self.critic_buffer.integrate(self._critic_data_buffer)
-        # HINDSIGHT EXPERIENCE REPLAY
-        for_hindsight = self._get_hindsight_data(self._critic_data_buffer)
-        for hinsight_part in for_hindsight:
-            for i, data in enumerate(reversed(hinsight_part)):
-                data["integer_targets"] = i
-                data["targets"][:i] = 0
-                data["targets"][i:] = 1
-        hindsight_data = np.concatenate(for_hindsight)
-        self.critic_buffer.integrate(hindsight_data)
-        #
-        self.n_critic_transition_gathered += self.episode_length * self.n_simulations
-        self.n_critic_episodes += self.n_simulations
+        ).all(axis=-1)
         time_stop = time.time()
+        # ADD TO THE REPLAY BUFFER AND LOG
+        self.critic_buffer.integrate(valid_part_of_buffer)
+        self.n_critic_transition_gathered += (self.episode_length - ptw - 1) * self.n_simulations
+        self.n_critic_episodes += self.n_simulations
+        # LOGGING
+        register_change = (
+            self._critic_data_buffer["current_goals"][:-1] !=
+            self._critic_data_buffer["current_goals"][1:]
+        ).any(axis=-1)
+        iteration_indices = {
+            i: changes.nonzero()[0]
+            for i, changes in enumerate(register_change.T) if changes.any()
+        }
+        prediction_error_sum = 0
+        prediction_error_n = 0
+        for simulation, changes in iteration_indices.items():
+            for iteration in range(self._critic_data_buffer.shape[0]):
+                next = np.argmax(changes > iteration)
+                if next or changes[0] > iteration:
+                    for transition_index in changes[next:]:
+                        state = self._critic_data_buffer["states"][iteration, simulation]
+                        actual_goal = self._critic_data_buffer["current_goals"][transition_index + 1, simulation]
+                        prediction = self.agent.get_predictions(
+                            state[np.newaxis],
+                            actual_goal[np.newaxis]).numpy()[0]
+                        prediction = get_time_prediction(
+                            prediction,              # 10, 4
+                            actual_goal[np.newaxis]  #  1, 4
+                        )
+                        truth = transition_index - iteration
+                        prediction_error_sum += np.abs(prediction - np.clip(truth, 0, self.prediction_time_window))
+                        prediction_error_n += 1
+        if prediction_error_n:
+            self.tb_collection_critic_mean_abs_prediction_error_it(
+                prediction_error_sum / prediction_error_n
+            )
+        #
+        one_away = np.sum(np.abs(
+            self._critic_data_buffer["goals"] -
+            self._critic_data_buffer["current_goals"]
+        ), axis=-1) == 1
+        one_away_successes = np.logical_and(one_away[:-1], goal_reached[1:])
+        one_away_fails = np.logical_and(
+            np.logical_and(one_away[:-1], np.logical_not(one_away[1:])),
+            np.logical_not(goal_reached[1:])
+        )
+        n_one_away_success = np.sum(one_away_successes)
+        n_one_away_fail = np.sum(one_away_fails)
+        if n_one_away_success + n_one_away_fail:
+            self.tb_collection_critic_one_away_sucess_rate(
+                100 * n_one_away_success / (n_one_away_success + n_one_away_fail)
+            )
+        #
         self.tb_collection_critic_it_per_sec(
             self.episode_length * self.n_simulations / (time_stop - time_start)
         )
-        integer_predictions = self._convert_to_integers(
-            self._critic_data_buffer["predictions"]
-        )
-        self.tb_collection_critic_mean_prediction(
-            np.mean(integer_predictions)
-        )
-        cliped_integer_targets = np.clip(
-            self._critic_data_buffer["integer_targets"],
-            0,
-            self.prediction_size
-        )
-        self.tb_collection_critic_mean_prediction_error(
+        #
+        self.tb_collection_critic_mean_abs_prediction_error(
             np.mean(np.abs(
-            integer_predictions - cliped_integer_targets
+                self._critic_data_buffer["targets"] -
+                self._critic_data_buffer["predictions"]
             ))
         )
+        #
+        successful_episode = goal_reached.any(axis=0)
         self.tb_collection_critic_success_rate_percent(
-            100 * np.mean(1 - failed_episode)
+            100 * np.mean(successful_episode)
         )
-        index_visualize = np.argmin(failed_episode) # index sucess episode if any
+        #
+        n_uniques = 0
+        for simulation in range(self.n_simulations):
+            episode = self._critic_data_buffer["current_goals"][:, simulation]
+            n_uniques += len(np.unique(episode, axis=0))
+        self.tb_collection_critic_goal_diversity(
+            n_uniques / self.n_simulations
+        )
+        distance_at_start = np.sqrt(np.sum((
+            self._critic_data_buffer["current_goals"][0] -
+            self._critic_data_buffer["goals"][0]
+        ) ** 2, axis=-1))
+        distance_at_end = np.sqrt(np.sum((
+            self._critic_data_buffer["current_goals"][-1] -
+            self._critic_data_buffer["goals"][-1]
+        ) ** 2, axis=-1))
+        #
+        self.tb_collection_critic_delta_distance_to_goal(
+            np.mean(distance_at_start - distance_at_end)
+        )
+        #
+        self.tb_collection_critic_n_register_change(
+            np.mean(np.sum(register_change, axis=0))
+        )
+        index_visualize = np.argmax(successful_episode) # index sucess episode if any
+        # TODO:
         if self._visualization is not None:
             self._visualization.update_critic(
-                target=cliped_integer_targets[:, index_visualize],
-                prediction=integer_predictions[:, index_visualize],
+                target=self._critic_data_buffer["targets"],
+                prediction=self._critic_data_buffer["predictions"],
             )
 
     def train_policy(self):

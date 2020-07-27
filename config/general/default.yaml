@@ -1,7 +1,7 @@
 agent:
   policy_learning_rate: 1e-3
   critic_learning_rate: 1e-3
-  prediction_time_window: 25
+  prediction_time_window: 10
 
   policy_model_arch:
     type: simple
@@ -26,7 +26,7 @@ agent:
         size: 400
         activation: tf.nn.relu
       id_2:
-        size: ${agent.prediction_time_window}
+        size: ${agent.prediction_time_window} * ${simulation.n_register}
         activation: tf.sigmoid
 
   action_shape:
@@ -51,6 +51,7 @@ simulation:
   guis:
     -
   environment: one_arm_2_buttons_1_levers_1_tap
+  n_register: 4
   n_joints: 7
 
 
@@ -64,16 +65,17 @@ procedure:
   visualize: False
   movement_mode: minimalist
   movement_span_in_sec: 2
-  her_lookup: 4
-
+  pessimism: 0.3
 
 experiment:
   n_episodes: 8000
   policy_every: 1
-  critic_every: 5
+  critic_every: 1
   record_episode_every: 10
   save_every: 100
   final_recording: True
+  dump_buffers_at:
+    - 100
 
 
 hydra:
