@@ -1,0 +1,85 @@
+agent:
+  policy_learning_rate: 1e-3
+  critic_learning_rate: 1e-3
+
+  policy_model_arch:
+    type: simple
+    layers:
+      id_0:
+        size: 200
+        activation: tf.nn.relu
+      id_1:
+        size: 200
+        activation: tf.nn.relu
+      id_2:
+        size: ${simulation.n_joints}
+        activation: tf.tanh
+
+  critic_model_arch:
+    type: simple
+    layers:
+      id_0:
+        size: 400
+        activation: tf.nn.relu
+      id_1:
+        size: 400
+        activation: tf.nn.relu
+      id_2:
+        size: ${simulation.n_register}
+        activation: tf.sigmoid
+
+  action_shape:
+    - ${simulation.n}
+    - ${simulation.n_joints}
+  exploration:
+    type: ornstein_uhlenbeck
+    stddev: 0.1
+    damping: 0.9
+
+
+buffer:
+  size: 10000
+
+
+simulation:
+  n: 40
+  guis:
+    -
+  environment: one_arm_4_buttons
+  n_register: 4
+  n_joints: 7
+
+
+procedure:
+  episode_length: 100
+  batch_size: 64
+  updates_per_sample: 40
+  simulation_timestep: 0.2
+  visualize: False
+  movement_mode: minimalist
+  movement_span_in_sec: 2
+
+experiment:
+  n_episodes: 8000
+  policy_every: 1
+  critic_every: 1
+  record_episode_every: 10
+  save_every: 100
+  final_recording: True
+  dump_buffers_at:
+    - 100
+
+
+hydra:
+  run:
+    dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}_${hydra.job.override_dirname}
+  sweep:
+    dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}/
+    subdir: job${hydra.job.num}_${hydra.job.override_dirname}
+  job:
+    config:
+      # configuration for the ${hydra.job.override_dirname} runtime variable
+      override_dirname:
+        kv_sep: '.'
+        item_sep: '__'
+        exclude_keys: []
