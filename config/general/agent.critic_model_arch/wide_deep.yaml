@@ -1,0 +1,19 @@
+agent:
+  critic_model_arch:
+    type: simple
+    layers:
+      id_0:
+        size: 600
+        activation: tf.nn.relu
+      id_1:
+        size: 600
+        activation: tf.nn.relu
+      id_2:
+        size: 600
+        activation: tf.nn.relu
+      id_3:
+        size: 600
+        activation: tf.nn.relu
+      id_4:
+        size: ${agent.prediction_time_window} * ${simulation.n_register}
+        activation: tf.sigmoid
