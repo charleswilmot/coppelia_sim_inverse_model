@@ -12,19 +12,6 @@ from tensorboard.plugins.hparams import api as hp
 from imageio import get_writer
 
 
-def _rec_expected_time(probs, t=1):
-    if not probs.shape[-1]:
-        return t
-    else:
-        return t * probs[..., 0] + \
-               (1 - probs[..., 0]) * _rec_expected_time(probs[..., 1:], t=t+1)
-
-
-def get_time_prediction(prediction, goal):
-    probs = np.prod(2 * goal * prediction + 1 - goal - prediction, axis=-1)
-    return _rec_expected_time(probs)
-
-
 class Procedure(object):
     def __init__(self, agent_conf, buffer_conf, simulation_conf, procedure_conf):
         #   PROCEDURE CONF
@@ -127,66 +114,45 @@ class Procedure(object):
         self.n_global_training = 0
 
         # TENSORBOARD LOGGING
-        self.tb_training_policy_loss = Mean(
-            "training/policy_loss",
-            dtype=tf.float32
-        )
-        self.tb_training_critic_loss = Mean(
-            "training/critic_loss",
-            dtype=tf.float32
-        )
-        self.tb_training_forward_loss = Mean(
-            "training/forward_loss",
-            dtype=tf.float32
-        )
-        self.tb_collection_exploration_it_per_sec = Mean(
-            "collection/exploration_it_per_sec",
-            dtype=tf.float32
-        )
-        self.tb_collection_evaluation_it_per_sec = Mean(
-            "collection/evaluation_it_per_sec",
-            dtype=tf.float32
-        )
-        self.tb_collection_exploration_success_rate_percent = Mean(
-            "collection/exploration_success_rate_percent",
-            dtype=tf.float32
-        )
-        self.tb_collection_evaluation_success_rate_percent = Mean(
-            "collection/evaluation_success_rate_percent",
-            dtype=tf.float32
-        )
-        self.tb_collection_exploration_diversity_per_ep = Mean(
-            "collection/exploration_diversity_per_ep",
-            dtype=tf.float32
-        )
-        self.tb_collection_evaluation_diversity_per_ep = Mean(
-            "collection/evaluation_diversity_per_ep",
-            dtype=tf.float32
-        )
-        self.tb_collection_exploration_delta_distance_to_goal = Mean(
-            "collection/exploration_delta_distance_to_goal",
-            dtype=tf.float32
-        )
-        self.tb_collection_evaluation_delta_distance_to_goal = Mean(
-            "collection/evaluation_delta_distance_to_goal",
-            dtype=tf.float32
-        )
-        self.tb_collection_exploration_n_register_change = Mean(
-            "collection/exploration_n_register_change",
-            dtype=tf.float32
-        )
-        self.tb_collection_evaluation_n_register_change = Mean(
-            "collection/evaluation_n_register_change",
-            dtype=tf.float32
-        )
-        self.tb_collection_exploration_one_away_sucess_rate = Mean(
-            "collection/exploration_one_away_sucess_rate",
-            dtype=tf.float32
-        )
-        self.tb_collection_evaluation_one_away_sucess_rate = Mean(
-            "collection/evaluation_one_away_sucess_rate",
-            dtype=tf.float32
-        )
+        self.tb = {}
+        self.tb["training"] = {}
+        self.tb["training"]["policy"] = {}
+        self.tb["training"]["policy"]["loss"] = Mean(
+            "training/policy_loss", dtype=tf.float32)
+        self.tb["training"]["critic"] = {}
+        self.tb["training"]["critic"]["loss"] = Mean(
+            "training/critic_loss", dtype=tf.float32)
+        self.tb["training"]["forward"] = {}
+        self.tb["training"]["forward"]["loss"] = Mean(
+            "training/forward_loss", dtype=tf.float32)
+        self.tb["collection"] = {}
+        self.tb["collection"]["exploration"] = {}
+        self.tb["collection"]["evaluation"] = {}
+        self.tb["collection"]["exploration"]["it_per_sec"] = Mean(
+            "collection/exploration_it_per_sec", dtype=tf.float32)
+        self.tb["collection"]["evaluation"]["it_per_sec"] = Mean(
+            "collection/evaluation_it_per_sec", dtype=tf.float32)
+        self.tb["collection"]["exploration"]["success_rate_percent"] = Mean(
+            "collection/exploration_success_rate_percent", dtype=tf.float32)
+        self.tb["collection"]["evaluation"]["success_rate_percent"] = Mean(
+            "collection/evaluation_success_rate_percent", dtype=tf.float32)
+        self.tb["collection"]["exploration"]["diversity_per_ep"] = Mean(
+            "collection/exploration_diversity_per_ep", dtype=tf.float32)
+        self.tb["collection"]["evaluation"]["diversity_per_ep"] = Mean(
+            "collection/evaluation_diversity_per_ep", dtype=tf.float32)
+        self.tb["collection"]["exploration"]["delta_distance_to_goal"] = Mean(
+            "collection/exploration_delta_distance_to_goal", dtype=tf.float32)
+        self.tb["collection"]["evaluation"]["delta_distance_to_goal"] = Mean(
+            "collection/evaluation_delta_distance_to_goal", dtype=tf.float32)
+        self.tb["collection"]["exploration"]["n_register_change"] = Mean(
+            "collection/exploration_n_register_change", dtype=tf.float32)
+        self.tb["collection"]["evaluation"]["n_register_change"] = Mean(
+            "collection/evaluation_n_register_change", dtype=tf.float32)
+        self.tb["collection"]["exploration"]["one_away_sucess_rate"] = Mean(
+            "collection/exploration_one_away_sucess_rate", dtype=tf.float32)
+        self.tb["collection"]["evaluation"]["one_away_sucess_rate"] = Mean(
+            "collection/evaluation_one_away_sucess_rate", dtype=tf.float32)
+        #
         self.summary_writer = tf.summary.create_file_writer("logs")
         with self.summary_writer.as_default():
             hp.hparams(self._hparams)
@@ -200,62 +166,42 @@ class Procedure(object):
         path = "./buffers/policy_{:6d}.pkl".format(self.n_policy_training)
         self.policy_buffer.dump(path)
 
-    def log_metric_list(self, metric_list, step):
+    def log_metrics(self, key1, key2, step):
         with self.summary_writer.as_default():
-            for metric in training_critic_metric_list:
+            for name, metric in self.tb[key1][key2].items():
                 tf.summary.scalar(metric.name, metric.result(), step=step)
                 metric.reset_states()
 
     def log_summaries(self, exploration=True, evaluation=True, critic=True,
             policy=True, forward=True):
-        training_critic_metric_list = [
-            self.tb_training_critic_loss
-        ]
-        training_policy_metric_list = [
-            self.tb_training_policy_loss
-        ]
-        training_forward_metric_list = [
-            self.tb_training_forward_loss
-        ]
-        collection_exploration_metric_list = [
-            self.tb_collection_exploration_it_per_sec,
-            self.tb_collection_exploration_success_rate_percent,
-            self.tb_collection_exploration_diversity_per_ep,
-            self.tb_collection_exploration_delta_distance_to_goal,
-            self.tb_collection_exploration_n_register_change,
-            self.tb_collection_exploration_one_away_sucess_rate,
-        ]
-        collection_evaluation_metric_list = [
-            self.tb_collection_evaluation_it_per_sec,
-            self.tb_collection_evaluation_success_rate_percent,
-            self.tb_collection_evaluation_diversity_per_ep,
-            self.tb_collection_evaluation_delta_distance_to_goal,
-            self.tb_collection_evaluation_n_register_change,
-            self.tb_collection_evaluation_one_away_sucess_rate,
-        ]
         if exploration:
-            self.log_metric_list(
-                collection_exploration_metric_list,
+            self.log_metrics(
+                "collection",
+                "exploration",
                 self.n_exploration_episodes
             )
         if evaluation:
-            self.log_metric_list(
-                collection_evaluation_metric_list,
+            self.log_metrics(
+                "collection",
+                "evaluation",
                 self.n_evaluation_episodes
             )
         if critic:
-            self.log_metric_list(
-                training_critic_metric_list,
+            self.log_metrics(
+                "training",
+                "critic",
                 self.n_critic_training
             )
         if policy:
-            self.log_metric_list(
-                training_policy_metric_list,
+            self.log_metrics(
+                "training",
+                "policy",
                 self.n_policy_training
             )
         if forward:
-            self.log_metric_list(
-                training_forward_metric_list,
+            self.log_metrics(
+                "training",
+                "forward",
                 self.n_forward_training
             )
 
@@ -371,106 +317,114 @@ class Procedure(object):
             states, current_goals = self.apply_action(best_noisy_actions)
         # COMPUTE RETURN (TODO)
         pass
-        # HINDSIGHT EXPERIENCE
+        # HINDSIGHT EXPERIENCE (TODO)
         register_change = (
-            self._policy_data_buffer["current_goals"][:-1] !=
-            self._policy_data_buffer["current_goals"][1:]
+            self._data_buffer["current_goals"][:-1] !=
+            self._data_buffer["current_goals"][1:]
         ).any(axis=-1)
         iteration_indices = {
             i: changes.nonzero()[0]
             for i, changes in enumerate(register_change.T) if changes.any()
         }
         for_hindsight = []
-        prediction_error_sum = 0
-        prediction_error_n = 0
-        for simulation, changes in iteration_indices.items():
-            for iteration in range(self._policy_data_buffer.shape[0]):
-                next = np.argmax(changes > iteration)
-                if next or changes[0] > iteration:
-                    for transition_index in changes[next:]:
-                        state = self._policy_data_buffer["states"][iteration, simulation]
-                        actual_goal = self._policy_data_buffer["current_goals"][transition_index + 1, simulation]
-                        prediction = self.agent.get_predictions(
-                            state[np.newaxis],
-                            actual_goal[np.newaxis]).numpy()[0]
-                        prediction = get_time_prediction(
-                            prediction,              # 10, 4
-                            actual_goal[np.newaxis]  #  1, 4
-                        )
-                        truth = transition_index - iteration
-                        prediction_error_sum += np.abs(prediction - np.clip(truth, 0, self.prediction_time_window))
-                        prediction_error_n += 1
-                        prediction = int(prediction)
-                        if truth < prediction * (1 - self.pessimism):
-                            print("YES: sim:{:2d} it:{:2d}  took me {:2d} steps to go from {} to {} at {:2d}, I predicted {:2d} ({:.3f})".format(
-                                simulation,
-                                iteration,
-                                truth,
-                                self._policy_data_buffer["current_goals"][transition_index, simulation],
-                                actual_goal,
-                                transition_index,
-                                prediction,
-                                prediction * (1 - self.pessimism)))
-                            copy = np.copy(self._policy_data_buffer[iteration, simulation])
-                            copy["goals"] = actual_goal
-                            for_hindsight.append(copy)
-                        else:
-                            print("NO : sim:{:2d} it:{:2d}  took me {:2d} steps to go from {} to {} at {:2d}, I predicted {:2d} ({:.3f})".format(
-                                simulation,
-                                iteration,
-                                truth,
-                                self._policy_data_buffer["current_goals"][transition_index, simulation],
-                                actual_goal,
-                                transition_index,
-                                prediction,
-                                prediction * (1 - self.pessimism)))
-        if len(for_hindsight):
-            hindsight_data = np.vstack(for_hindsight)
-            self.policy_buffer.integrate(hindsight_data)
-            n_discoveries = len(hindsight_data)
-        else:
-            n_discoveries = 0
+        # prediction_error_sum = 0
+        # prediction_error_n = 0
+        # for simulation, changes in iteration_indices.items():
+        #     for iteration in range(self._data_buffer.shape[0]):
+        #         next = np.argmax(changes > iteration)
+        #         if next or changes[0] > iteration:
+        #             for transition_index in changes[next:]:
+        #                 state = self._data_buffer["states"][iteration, simulation]
+        #                 actual_goal = self._data_buffer["current_goals"][transition_index + 1, simulation]
+        #                 prediction = self.agent.get_predictions(
+        #                     state[np.newaxis],
+        #                     actual_goal[np.newaxis]).numpy()[0]
+        #                 prediction = get_time_prediction(
+        #                     prediction,              # 10, 4
+        #                     actual_goal[np.newaxis]  #  1, 4
+        #                 )
+        #                 truth = transition_index - iteration
+        #                 prediction_error_sum += np.abs(prediction - np.clip(truth, 0, self.prediction_time_window))
+        #                 prediction_error_n += 1
+        #                 prediction = int(prediction)
+        #                 if truth < prediction * (1 - self.pessimism):
+        #                     print("YES: sim:{:2d} it:{:2d}  took me {:2d} steps to go from {} to {} at {:2d}, I predicted {:2d} ({:.3f})".format(
+        #                         simulation,
+        #                         iteration,
+        #                         truth,
+        #                         self._data_buffer["current_goals"][transition_index, simulation],
+        #                         actual_goal,
+        #                         transition_index,
+        #                         prediction,
+        #                         prediction * (1 - self.pessimism)))
+        #                     copy = np.copy(self._data_buffer[iteration, simulation])
+        #                     copy["goals"] = actual_goal
+        #                     for_hindsight.append(copy)
+        #                 else:
+        #                     print("NO : sim:{:2d} it:{:2d}  took me {:2d} steps to go from {} to {} at {:2d}, I predicted {:2d} ({:.3f})".format(
+        #                         simulation,
+        #                         iteration,
+        #                         truth,
+        #                         self._data_buffer["current_goals"][transition_index, simulation],
+        #                         actual_goal,
+        #                         transition_index,
+        #                         prediction,
+        #                         prediction * (1 - self.pessimism)))
+        # if len(for_hindsight):
+        #     hindsight_data = np.vstack(for_hindsight)
+        #     self.policy_buffer.integrate(hindsight_data)
+        #     n_discoveries = len(hindsight_data)
+        # else:
+        #     n_discoveries = 0
         self.n_policy_transition_gathered += n_discoveries
         self.n_policy_episodes += self.n_simulations
         time_stop = time.time()
-        self.tb_collection_policy_it_per_sec(
-            self.episode_length * self.n_simulations / (time_stop - time_start)
+        if exploration:
+            tb = self.tb["collection"]["exploration"]
+        else:
+            tb = self.tb["collection"]["evaluation"]
+        #
+        n_iterations = self.episode_length * self.n_simulations
+        it_per_sec = n_iterations / (time_stop - time_start)
+        tb["it_per_sec"](it_per_sec)
+        #
+        goals = self._data_buffer["goals"]
+        current_goals = self._data_buffer["current_goals"]
+        goal_reached = (goals == current_goals).all(axis=-1)
+        success_rate_percent = 100 * np.mean(goal_reached.any(axis=1))
+        tb["success_rate_percent"](success_rate_percent)
+        #
+        n_uniques = sum([len(np.unique(x, axis=0)) for x in current_goals])
+        n_uniques /= self.n_simulations
+        tb["diversity_per_ep"](n_uniques)
+        #
+        distance_at_start = np.sqrt(np.sum(
+            (current_goals[:, 0] - goals[:, 0]) ** 2,
+            axis=-1)
         )
-        goal_reached = (
-            self._policy_data_buffer["goals"] == \
-            self._policy_data_buffer["current_goals"]
-        ).all(axis=-1)
-        self.tb_collection_policy_success_rate_percent(
-            100 * np.mean(goal_reached.any(axis=0))
+        distance_at_end = np.sqrt(np.sum(
+            (current_goals[:, -1] - goals[:, -1]) ** 2,
+            axis=-1)
         )
-        self.tb_collection_policy_discoveries_per_ep(
-            n_discoveries
+        delta_distance = np.mean(distance_at_start - distance_at_end)
+        tb["delta_distance_to_goal"](delta_distance)
+        #
+        n_register_change = np.mean(np.sum(register_change, axis=1))
+        tb["n_register_change"](n_register_change)
+        #
+        one_away = np.sum(np.abs(goals - current_goals), axis=-1) == 1
+        one_away_successes = np.logical_and(one_away[:-1], goal_reached[1:])
+        one_away_fails = np.logical_and(
+            np.logical_and(one_away[:-1], np.logical_not(one_away[1:])),
+            np.logical_not(goal_reached[1:])
         )
-        if prediction_error_n:
-            self.tb_collection_policy_mean_abs_prediction_error_it(
-                prediction_error_sum / prediction_error_n
-            )
-        n_uniques = 0
-        for simulation in range(self.n_simulations):
-            episode = self._policy_data_buffer["current_goals"][:, simulation]
-            n_uniques += len(np.unique(episode, axis=0))
-        self.tb_collection_policy_goal_diversity(
-            n_uniques / self.n_simulations
-        )
-        distance_at_start = np.sqrt(np.sum((
-            self._policy_data_buffer["current_goals"][0] -
-            self._policy_data_buffer["goals"][0]
-        ) ** 2, axis=-1))
-        distance_at_end = np.sqrt(np.sum((
-            self._policy_data_buffer["current_goals"][-1] -
-            self._policy_data_buffer["goals"][-1]
-        ) ** 2, axis=-1))
-        self.tb_collection_policy_delta_distance_to_goal(
-            np.mean(distance_at_start - distance_at_end)
-        )
-        self.tb_collection_policy_n_register_change(
-            np.mean(np.sum(register_change, axis=0))
-        )
+        n_one_away_success = np.sum(one_away_successes)
+        n_one_away_fail = np.sum(one_away_fails)
+        n_one_away_ends = n_one_away_success + n_one_away_fail
+        if n_one_away_success + n_one_away_fail:
+            one_away_success_rate = 100 * n_one_away_success / n_one_away_ends
+            tb["one_away_sucess_rate"](one_away_success_rate)
+        #
 
     def get_data(self):
         states, current_goals = tuple(zip(*self.simulation_pool.get_data()))
@@ -486,149 +440,26 @@ class Procedure(object):
                 )))
         return np.vstack(states), np.vstack(current_goals)
 
-    # def gather_critic_data(self):
-    #     """Performs one episode of testing, places the data in the critic
-    #     buffer"""
-    #     time_start = time.time()
-    #     goals = self.sample_goals()
-    #     states, current_goals = self.reset_simulations()
-    #     for iteration in range(self.episode_length):
-    #         pure_actions = self.agent.get_actions(
-    #             states, goals, exploration=False)
-    #         predictions = self.agent.get_predictions(states, goals)
-    #         self._critic_data_buffer[iteration]["states"] = states
-    #         self._critic_data_buffer[iteration]["goals"] = goals
-    #         self._critic_data_buffer[iteration]["current_goals"] = current_goals
-    #         self._critic_data_buffer[iteration]["pure_actions"] = pure_actions
-    #         self._critic_data_buffer[iteration]["predictions"] = predictions
-    #         states, current_goals = self.apply_action(pure_actions)
-    #     # COMPLETE THE BUFFER WITH THE PREDICTION TARGETS
-    #     ptw = self.prediction_time_window
-    #     for i in range(self.prediction_time_window):
-    #         self._critic_data_buffer["targets"][:-ptw - 1, :, i] = \
-    #             self._critic_data_buffer["current_goals"][i + 1:i + self.episode_length - ptw]
-    #     valid_part_of_buffer = self._critic_data_buffer[:-ptw - 1]
-    #     goal_reached = (
-    #         self._critic_data_buffer["goals"] == \
-    #         self._critic_data_buffer["current_goals"]
-    #     ).all(axis=-1)
-    #     time_stop = time.time()
-    #     # ADD TO THE REPLAY BUFFER AND LOG
-    #     self.critic_buffer.integrate(valid_part_of_buffer)
-    #     self.n_critic_transition_gathered += (self.episode_length - ptw - 1) * self.n_simulations
-    #     self.n_critic_episodes += self.n_simulations
-    #     # LOGGING
-    #     register_change = (
-    #         self._critic_data_buffer["current_goals"][:-1] !=
-    #         self._critic_data_buffer["current_goals"][1:]
-    #     ).any(axis=-1)
-    #     iteration_indices = {
-    #         i: changes.nonzero()[0]
-    #         for i, changes in enumerate(register_change.T) if changes.any()
-    #     }
-    #     prediction_error_sum = 0
-    #     prediction_error_n = 0
-    #     for simulation, changes in iteration_indices.items():
-    #         for iteration in range(self._critic_data_buffer.shape[0]):
-    #             next = np.argmax(changes > iteration)
-    #             if next or changes[0] > iteration:
-    #                 for transition_index in changes[next:]:
-    #                     state = self._critic_data_buffer["states"][iteration, simulation]
-    #                     actual_goal = self._critic_data_buffer["current_goals"][transition_index + 1, simulation]
-    #                     prediction = self.agent.get_predictions(
-    #                         state[np.newaxis],
-    #                         actual_goal[np.newaxis]).numpy()[0]
-    #                     prediction = get_time_prediction(
-    #                         prediction,              # 10, 4
-    #                         actual_goal[np.newaxis]  #  1, 4
-    #                     )
-    #                     truth = transition_index - iteration
-    #                     prediction_error_sum += np.abs(prediction - np.clip(truth, 0, self.prediction_time_window))
-    #                     prediction_error_n += 1
-    #     if prediction_error_n:
-    #         self.tb_collection_critic_mean_abs_prediction_error_it(
-    #             prediction_error_sum / prediction_error_n
-    #         )
-    #     #
-    #     one_away = np.sum(np.abs(
-    #         self._critic_data_buffer["goals"] -
-    #         self._critic_data_buffer["current_goals"]
-    #     ), axis=-1) == 1
-    #     one_away_successes = np.logical_and(one_away[:-1], goal_reached[1:])
-    #     one_away_fails = np.logical_and(
-    #         np.logical_and(one_away[:-1], np.logical_not(one_away[1:])),
-    #         np.logical_not(goal_reached[1:])
-    #     )
-    #     n_one_away_success = np.sum(one_away_successes)
-    #     n_one_away_fail = np.sum(one_away_fails)
-    #     if n_one_away_success + n_one_away_fail:
-    #         self.tb_collection_critic_one_away_sucess_rate(
-    #             100 * n_one_away_success / (n_one_away_success + n_one_away_fail)
-    #         )
-    #     #
-    #     self.tb_collection_critic_it_per_sec(
-    #         self.episode_length * self.n_simulations / (time_stop - time_start)
-    #     )
-    #     #
-    #     self.tb_collection_critic_mean_abs_prediction_error(
-    #         np.mean(np.abs(
-    #             self._critic_data_buffer["targets"] -
-    #             self._critic_data_buffer["predictions"]
-    #         ))
-    #     )
-    #     #
-    #     successful_episode = goal_reached.any(axis=0)
-    #     self.tb_collection_critic_success_rate_percent(
-    #         100 * np.mean(successful_episode)
-    #     )
-    #     #
-    #     n_uniques = 0
-    #     for simulation in range(self.n_simulations):
-    #         episode = self._critic_data_buffer["current_goals"][:, simulation]
-    #         n_uniques += len(np.unique(episode, axis=0))
-    #     self.tb_collection_critic_goal_diversity(
-    #         n_uniques / self.n_simulations
-    #     )
-    #     distance_at_start = np.sqrt(np.sum((
-    #         self._critic_data_buffer["current_goals"][0] -
-    #         self._critic_data_buffer["goals"][0]
-    #     ) ** 2, axis=-1))
-    #     distance_at_end = np.sqrt(np.sum((
-    #         self._critic_data_buffer["current_goals"][-1] -
-    #         self._critic_data_buffer["goals"][-1]
-    #     ) ** 2, axis=-1))
-    #     #
-    #     self.tb_collection_critic_delta_distance_to_goal(
-    #         np.mean(distance_at_start - distance_at_end)
-    #     )
-    #     #
-    #     self.tb_collection_critic_n_register_change(
-    #         np.mean(np.sum(register_change, axis=0))
-    #     )
-    #     index_visualize = np.argmax(successful_episode) # index sucess episode if any
-    #     # TODO:
-    #     if self._visualization is not None:
-    #         self._visualization.update_critic(
-    #             target=self._critic_data_buffer["targets"],
-    #             prediction=self._critic_data_buffer["predictions"],
-    #         )
-
     def train(self, policy=True, critic=True, forward=True):
         data = self.buffer.sample(self.batch_size)
         losses = self.agent.train(
             data["states"],
             data["goals"],
-            data["noisy_actions"]
+            data["noisy_actions"],
+            policy=policy,
+            critic=critic,
+            forward=forward,
         )
+        tb = self.tb["training"]
         if policy:
             self.n_policy_training += 1
-            self.tb_training_policy_loss(losses["policy"])
+            tb["policy"]["loss"](losses["policy"])
         if critic:
             self.n_critic_training += 1
-            self.tb_training_critic_loss(losses["critic"])
+            tb["critic"]["loss"](losses["critic"])
         if forward:
             self.n_forward_training += 1
-            self.tb_training_forward_loss(losses["forward"])
+            tb["forward"]["loss"](losses["forward"])
         self.n_global_training += 1
         return losses
 
