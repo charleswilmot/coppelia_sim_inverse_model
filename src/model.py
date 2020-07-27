@@ -8,7 +8,8 @@ class Model(keras.Model):
         self.type = type
         if self.type == "simple":
             sizes_activations = [
-                [layers[n].size, layers[n].activation] for n in sorted(layers)
+                [eval(str(layers[n].size)), layers[n].activation]
+                for n in sorted(layers)
             ]
             activ = sizes_activations[-1][1]
             sizes_activations[-1][1] = "None"
