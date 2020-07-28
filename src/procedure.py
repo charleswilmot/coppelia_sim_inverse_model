@@ -21,6 +21,7 @@ class Procedure(object):
         self.forward_updates_per_sample = procedure_conf.forward_updates_per_sample
         self.batch_size = procedure_conf.batch_size
         self.n_simulations = simulation_conf.n
+        self.log_freq = procedure_conf.log_freq
         self.movement_mode = procedure_conf.movement_mode
         self.movement_span = int(procedure_conf.movement_span_in_sec / \
                                  procedure_conf.simulation_timestep)
@@ -473,6 +474,6 @@ class Procedure(object):
         self.collect_and_train(policy=policy, critic=critic, forward=forward)
         if evaluation:
             self.collect_data(exploration=False)
-        if self.n_critic_episodes % 1 == 0:
+        if self.n_global_training % self.log_freq == 0:
             self.log_summaries(exploration=True, evaluation=evaluation,
                 policy=policy, critic=critic, forward=forward)

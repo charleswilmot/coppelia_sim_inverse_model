@@ -1,5 +1,0 @@
-rundir: ???
-
-hydra:
-  run:
-    dir: /tmp/${now:%Y-%m-%d}/${now:%H-%M-%S}

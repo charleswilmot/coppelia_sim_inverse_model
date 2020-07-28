@@ -4,31 +4,210 @@ agent:
   prediction_time_window: 10
 
   policy_model_arch:
-    type: simple
-    layers:
-      id_0:
-        size: 200
-        activation: tf.nn.relu
-      id_1:
-        size: 200
-        activation: tf.nn.relu
-      id_2:
-        size: ${simulation.n_joints}
-        activation: tf.tanh
+    backend: tensorflow
+    class_name: Sequential
+    config:
+      layers:
+      - class_name: Dense
+        config:
+          activation: relu
+          activity_regularizer: null
+          bias_constraint: null
+          bias_initializer:
+            class_name: Zeros
+            config: {}
+          bias_regularizer: null
+          dtype: float32
+          kernel_constraint: null
+          kernel_initializer:
+            class_name: GlorotUniform
+            config:
+              seed: null
+          kernel_regularizer: null
+          name: dense
+          trainable: true
+          units: 200
+          use_bias: true
+      - class_name: Dense
+        config:
+          activation: relu
+          activity_regularizer: null
+          bias_constraint: null
+          bias_initializer:
+            class_name: Zeros
+            config: {}
+          bias_regularizer: null
+          dtype: float32
+          kernel_constraint: null
+          kernel_initializer:
+            class_name: GlorotUniform
+            config:
+              seed: null
+          kernel_regularizer: null
+          name: dense_1
+          trainable: true
+          units: 200
+          use_bias: true
+      - class_name: Dense
+        config:
+          activation: tanh
+          activity_regularizer: null
+          bias_constraint: null
+          bias_initializer:
+            class_name: Zeros
+            config: {}
+          bias_regularizer: null
+          dtype: float32
+          kernel_constraint: null
+          kernel_initializer:
+            class_name: GlorotUniform
+            config:
+              seed: null
+          kernel_regularizer: null
+          name: dense_2
+          trainable: true
+          units: ${simulation.n_joints}
+          use_bias: true
+      name: sequential
+    keras_version: 2.3.0-tf
 
   critic_model_arch:
-    type: simple
-    layers:
-      id_0:
-        size: 400
-        activation: tf.nn.relu
-      id_1:
-        size: 400
-        activation: tf.nn.relu
-      id_2:
-        size: ${agent.prediction_time_window} * ${simulation.n_register}
-        activation: tf.sigmoid
+    backend: tensorflow
+    class_name: Sequential
+    config:
+      layers:
+      - class_name: Dense
+        config:
+          activation: relu
+          activity_regularizer: null
+          bias_constraint: null
+          bias_initializer:
+            class_name: Zeros
+            config: {}
+          bias_regularizer: null
+          dtype: float32
+          kernel_constraint: null
+          kernel_initializer:
+            class_name: GlorotUniform
+            config:
+              seed: null
+          kernel_regularizer: null
+          name: dense
+          trainable: true
+          units: 200
+          use_bias: true
+      - class_name: Dense
+        config:
+          activation: relu
+          activity_regularizer: null
+          bias_constraint: null
+          bias_initializer:
+            class_name: Zeros
+            config: {}
+          bias_regularizer: null
+          dtype: float32
+          kernel_constraint: null
+          kernel_initializer:
+            class_name: GlorotUniform
+            config:
+              seed: null
+          kernel_regularizer: null
+          name: dense_1
+          trainable: true
+          units: 200
+          use_bias: true
+      - class_name: Dense
+        config:
+          activation: linear
+          activity_regularizer: null
+          bias_constraint: null
+          bias_initializer:
+            class_name: Zeros
+            config: {}
+          bias_regularizer: null
+          dtype: float32
+          kernel_constraint: null
+          kernel_initializer:
+            class_name: GlorotUniform
+            config:
+              seed: null
+          kernel_regularizer: null
+          name: dense_2
+          trainable: true
+          units: 1
+          use_bias: true
+      name: sequential
+    keras_version: 2.3.0-tf
 
+  forward_model_arch:
+    backend: tensorflow
+    class_name: Sequential
+    config:
+      layers:
+      - class_name: Dense
+        config:
+          activation: relu
+          activity_regularizer: null
+          bias_constraint: null
+          bias_initializer:
+            class_name: Zeros
+            config: {}
+          bias_regularizer: null
+          dtype: float32
+          kernel_constraint: null
+          kernel_initializer:
+            class_name: GlorotUniform
+            config:
+              seed: null
+          kernel_regularizer: null
+          name: dense
+          trainable: true
+          units: 200
+          use_bias: true
+      - class_name: Dense
+        config:
+          activation: relu
+          activity_regularizer: null
+          bias_constraint: null
+          bias_initializer:
+            class_name: Zeros
+            config: {}
+          bias_regularizer: null
+          dtype: float32
+          kernel_constraint: null
+          kernel_initializer:
+            class_name: GlorotUniform
+            config:
+              seed: null
+          kernel_regularizer: null
+          name: dense_1
+          trainable: true
+          units: 200
+          use_bias: true
+      - class_name: Dense
+        config:
+          activation: linear
+          activity_regularizer: null
+          bias_constraint: null
+          bias_initializer:
+            class_name: Zeros
+            config: {}
+          bias_regularizer: null
+          dtype: float32
+          kernel_constraint: null
+          kernel_initializer:
+            class_name: GlorotUniform
+            config:
+              seed: null
+          kernel_regularizer: null
+          name: dense_2
+          trainable: true
+          units: ${agent.state_size}
+          use_bias: true
+      name: sequential
+    keras_version: 2.3.0-tf
+
+  state_size: ???
   action_shape:
     - ${simulation.n}
     - ${simulation.n_joints}
@@ -50,7 +229,7 @@ simulation:
   n: 40
   guis:
     -
-  environment: one_arm_2_buttons_1_levers_1_tap
+  environment: one_arm_4_buttons
   n_register: 4
   n_joints: 7
 
@@ -66,6 +245,7 @@ procedure:
   movement_mode: minimalist
   movement_span_in_sec: 2
   pessimism: 0.3
+  log_freq: 1
 
 experiment:
   n_episodes: 8000

@@ -1,6 +1,5 @@
 import tensorflow as tf
 from tensorflow import keras
-from model import Model
 from ornstein_uhlenbeck import OUProcess
 
 
@@ -8,17 +7,22 @@ class Agent(object):
     def __init__(self,
             policy_learning_rate, policy_model_arch,
             critic_learning_rate, critic_model_arch,
-            exploration, prediction_time_window, action_shape):
+            exploration, action_shape):
         #   POLICY
         self.policy_learning_rate = policy_learning_rate
-        self.policy_model_arch = policy_model_arch
-        self.policy_model = Model(**policy_model_arch)
+        self.policy_model = keras.models.model_from_yaml(
+            policy_model_arch.pretty())
         self.policy_optimizer = keras.optimizers.Adam(self.policy_learning_rate)
         #   CRITIC
         self.critic_learning_rate = critic_learning_rate
-        self.critic_model_arch = critic_model_arch
-        self.critic_model = Model(**critic_model_arch)
+        self.critic_model = keras.models.model_from_yaml(
+            critic_model_arch.pretty())
         self.critic_optimizer = keras.optimizers.Adam(self.critic_learning_rate)
+        #   FORWARD
+        self.forward_learning_rate = forward_learning_rate
+        self.forward_model = keras.models.model_from_yaml(
+            forward_model_arch.pretty())
+        self.forward_optimizer = keras.optimizers.Adam(self.forward_learning_rate)
         #   EXPLORATION NOISE
         self.exploration_params = exploration
         self.exploration_type = exploration.type
@@ -26,8 +30,6 @@ class Agent(object):
         self.exploration_damping = exploration.damping
         self.ou_process = None
         self._action_shape = action_shape.to_container(resolve=True)
-        #   OTHER PARAMS
-        self.prediction_time_window = prediction_time_window
 
     def save_weights(self, path):
         self.policy_model.save_weights(path + "/policy_model")

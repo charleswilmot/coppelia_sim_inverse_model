@@ -22,7 +22,7 @@ agent:
           kernel_regularizer: null
           name: dense
           trainable: true
-          units: 200
+          units: 600
           use_bias: true
       - class_name: Dense
         config:
@@ -42,7 +42,7 @@ agent:
           kernel_regularizer: null
           name: dense_1
           trainable: true
-          units: 200
+          units: 600
           use_bias: true
       - class_name: Dense
         config:
@@ -62,7 +62,7 @@ agent:
           kernel_regularizer: null
           name: dense_2
           trainable: true
-          units: 1
+          units: ${agent.state_size}
           use_bias: true
       name: sequential
     keras_version: 2.3.0-tf

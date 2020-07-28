@@ -62,7 +62,7 @@ agent:
           kernel_regularizer: null
           name: dense_2
           trainable: true
-          units: 1
+          units: ${agent.state_size}
           use_bias: true
       name: sequential
     keras_version: 2.3.0-tf
