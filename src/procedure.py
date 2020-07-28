@@ -74,14 +74,9 @@ class Procedure(object):
         self.simulation_pool.start_sim()
         self.simulation_pool.step_sim()
         print("[procedure] all simulation started")
-        with self.simulation_pool.specific(0):
-            self.goal_size = self.simulation_pool.get_n_registers()[0]
-            self.state_size = self.simulation_pool.get_state()[0].shape[0]
-            self.action_size = self.simulation_pool.get_n_joints()[0]
-            self.prediction_size = (
-                agent_conf.prediction_time_window,
-                simulation_conf.n_register
-            )
+        self.goal_size = agent_conf.goal_size
+        self.state_size = agent_conf.state_size
+        self.action_size = agent_conf.action_size
 
         print("self.goal_size", self.goal_size)
         print("self.state_size", self.state_size)
@@ -293,39 +288,70 @@ class Procedure(object):
         time_start = time.time()
         for iteration in range(self.episode_length):
             pure_actions, noisy_actions, noises = self.agent.get_actions(
-                states, goals, exploration=True)
-            predictions = self.agent.get_predictions(states, noisy_actions)
-            next_actions = self.agent.get_actions(
-                predictions, goals, exploration=False
+                states, goals, exploration=True) # todo: must expand / broadcast
+            # resulting shape must be (n_simulations, n_noise, n_joints)
+            # maybe we can simplify the return value (only noisy_actions here)
+            predicted_next_states = self.agent.get_predictions(
+                states,
+                noisy_actions,
+                multiple_actions_per_state=True, # todo implement this in agent
             )
-            next_return_estimate = self.agent.get_next_return_estimate(
-                predictions,
-                next_actions,
-                goals
-            ).numpy()
-            indices_best = np.argmax(next_return_estimate, axis=-1)
-            noisy_actions = noisy_actions[:, indices_best]
-            next_states = predictions[:, indices_best]
-            next_actions = next_actions[:, indices_best]
-            self._data_buffer[:, iteration]["states"] = states
-            self._data_buffer[:, iteration]["next_states"] = states
-            self._data_buffer[:, iteration]["goals"] = goals
-            self._data_buffer[:, iteration]["current_goals"] = current_goals
-            self._data_buffer[:, iteration]["pure_actions"] = pure_actions
-            self._data_buffer[:, iteration]["next_pure_actions"] = next_actions
-            self._data_buffer[:, iteration]["noisy_actions"] = best_noisy_actions
-            self._data_buffer[:, iteration]["predictions"] = predictions
+            next_pure_actions = self.agent.get_actions(
+                predicted_next_states,
+                goals,
+                exploration=False,
+                multiple_states_per_goal=True # todo implement this in agent
+            )
+            next_return_estimate = self.agent.get_return_estimate(
+                predicted_next_states,
+                next_pure_actions,
+                goals,
+                multiple_states_and_actions_per_goal=True # todo implement this in agent
+            )
+            indices_best = np.argmax(next_return_estimate.numpy(), axis=-1)
+            best_noisy_actions = noisy_actions[:, indices_best]
+            best_predicted_next_states = predicted_next_states[:, indices_best]
+            best_next_pure_actions = next_pure_actions[:, indices_best]
+            # todo: rename all these fields properly (according to input of `trian`)
+            self._train_data_buffer[:, iteration]["states"] = states
+            self._train_data_buffer[:, iteration]["actions"] = best_noisy_actions
+            self._train_data_buffer[:, iteration]["goals"] = goals
+            self._train_data_buffer[:, iteration]["forward_targets"] = # --> filled later
+            self._train_data_buffer[:, iteration]["critic_targets"] = # --> filled later
+            # not necessary for training but useful for logging:
+            # make a training_data_buffer / logging_data_buffer (todo)
+            self._log_data_buffer[:, iteration]["current_goals"] = current_goals
+            self._log_data_buffer[:, iteration]["pure_actions"] = pure_actions
+            self._log_data_buffer[:, iteration]["next_pure_actions"] = best_next_pure_actions
+            self._log_data_buffer[:, iteration]["predicted_next_states"] = best_predicted_next_states
+            self._log_data_buffer[:, iteration]["rewards"] = # --> filled later
             states, current_goals = self.apply_action(best_noisy_actions)
-        # COMPUTE RETURN (TODO)
-        pass
+        goals = self._train_data_buffer["goals"]
+        current_goals = self._log_data_buffer["current_goals"]
+        # COMPUTE TARGETS (TODO)
+        # forward target (valid until :-1)
+        states = self._train_data_buffer["states"]
+        self._train_data_buffer[:, :-1]["forward_targets"] = states[:, 1:]
+        # critic target (valid until :-1)
+        distances = np.sum(np.abs(goals - current_goals), axis=-1)
+        self._log_data_buffer[:, :-1]["rewards"] = distances[:, :-1] - distances[:, 1:]
+        rewards = self._log_data_buffer[:, :-1]["rewards"]
+        self._train_data_buffer[:, :-1]["critic_targets"] = \
+            rewards[:, :-1] + \
+            self.discount_factor * self.agent.get_return_estimate(
+                states[:, 1:],
+                actions[:, 1:],
+                goals[:, 1:],
+                target=True,
+                double_batch_dim=True # todo implement this in agent
+            )
         # HINDSIGHT EXPERIENCE (TODO)
         register_change = (
-            self._data_buffer["current_goals"][:-1] !=
-            self._data_buffer["current_goals"][1:]
+            current_goals[:, :-1] != current_goals[:, 1:]
         ).any(axis=-1)
         iteration_indices = {
             i: changes.nonzero()[0]
-            for i, changes in enumerate(register_change.T) if changes.any()
+            for i, changes in enumerate(register_change) if changes.any()
         }
         for_hindsight = []
         # prediction_error_sum = 0
@@ -389,8 +415,6 @@ class Procedure(object):
         it_per_sec = n_iterations / (time_stop - time_start)
         tb["it_per_sec"](it_per_sec)
         #
-        goals = self._data_buffer["goals"]
-        current_goals = self._data_buffer["current_goals"]
         goal_reached = (goals == current_goals).all(axis=-1)
         success_rate_percent = 100 * np.mean(goal_reached.any(axis=1))
         tb["success_rate_percent"](success_rate_percent)
@@ -445,8 +469,10 @@ class Procedure(object):
         data = self.buffer.sample(self.batch_size)
         losses = self.agent.train(
             data["states"],
+            data["actions"],
             data["goals"],
-            data["noisy_actions"],
+            data["critic_targets"],
+            data["forward_targets"],
             policy=policy,
             critic=critic,
             forward=forward,
