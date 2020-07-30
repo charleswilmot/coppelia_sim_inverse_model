@@ -31,6 +31,7 @@ class Procedure(object):
         self.movement_spans = [
             self.movement_span for i in range(self.n_simulations)
         ]
+        self.her_max_replays = procedure_conf.her.max_replays
         #    HPARAMS
         self._hparams = OrderedDict([
             ("policy_LR", agent_conf.policy_learning_rate),
@@ -85,20 +86,27 @@ class Procedure(object):
 
         #   DEFINING DATA BUFFERS
         # policy
-        self._data_type = np.dtype([
+        self._train_data_type = np.dtype([
             ("states", np.float32, self.state_size),
-            ("next_states", np.float32, self.state_size),
+            ("noisy_actions", np.float32, self.action_size),
             ("goals", np.float32, self.goal_size),
+            ("forward_targets", np.float32, self.state_size),
+            ("critic_targets", np.float32),
+        ])
+        self._train_data_buffer = np.zeros(
+            shape=(self.n_simulations, self.episode_length),
+            dtype=self._train_data_type
+        )
+        self._log_data_type = np.dtype([
             ("current_goals", np.float32, self.goal_size),
             ("pure_actions", np.float32, self.action_size),
-            ("noisy_actions", np.float32, self.action_size),
-            ("predictions", np.float32, self.prediction_size),
-            ("return", np.float32)
-            ("_simulator_index", np.int16)
+            ("next_pure_actions", np.float32, self.action_size),
+            ("predicted_next_states", np.float32, self.state_size),
+            ("rewards", np.float32),
         ])
-        self._data_buffer = np.zeros(
+        self._log_data_buffer = np.zeros(
             shape=(self.n_simulations, self.episode_length),
-            dtype=self._data_type
+            dtype=self._log_data_type
         )
         # COUNTERS
         self.n_exploration_episodes = 0
@@ -288,9 +296,7 @@ class Procedure(object):
         time_start = time.time()
         for iteration in range(self.episode_length):
             pure_actions, noisy_actions, noises = self.agent.get_actions(
-                states, goals, exploration=True) # todo: must expand / broadcast
-            # resulting shape must be (n_simulations, n_noise, n_joints)
-            # maybe we can simplify the return value (only noisy_actions here)
+                states, goals, exploration=True)
             predicted_next_states = self.agent.get_predictions(
                 states,
                 noisy_actions,
@@ -309,23 +315,18 @@ class Procedure(object):
             best_noisy_actions = noisy_actions[:, indices_best]
             best_predicted_next_states = predicted_next_states[:, indices_best]
             best_next_pure_actions = next_pure_actions[:, indices_best]
-            # todo: rename all these fields properly (according to input of `trian`)
             self._train_data_buffer[:, iteration]["states"] = states
-            self._train_data_buffer[:, iteration]["actions"] = best_noisy_actions
+            self._train_data_buffer[:, iteration]["noisy_actions"] = best_noisy_actions
             self._train_data_buffer[:, iteration]["goals"] = goals
-            self._train_data_buffer[:, iteration]["forward_targets"] = # --> filled later
-            self._train_data_buffer[:, iteration]["critic_targets"] = # --> filled later
             # not necessary for training but useful for logging:
-            # make a training_data_buffer / logging_data_buffer (todo)
             self._log_data_buffer[:, iteration]["current_goals"] = current_goals
             self._log_data_buffer[:, iteration]["pure_actions"] = pure_actions
             self._log_data_buffer[:, iteration]["next_pure_actions"] = best_next_pure_actions
             self._log_data_buffer[:, iteration]["predicted_next_states"] = best_predicted_next_states
-            self._log_data_buffer[:, iteration]["rewards"] = # --> filled later
             states, current_goals = self.apply_action(best_noisy_actions)
         goals = self._train_data_buffer["goals"]
         current_goals = self._log_data_buffer["current_goals"]
-        # COMPUTE TARGETS (TODO)
+        # COMPUTE TARGETS
         # forward target (valid until :-1)
         states = self._train_data_buffer["states"]
         self._train_data_buffer[:, :-1]["forward_targets"] = states[:, 1:]
@@ -333,7 +334,7 @@ class Procedure(object):
         distances = np.sum(np.abs(goals - current_goals), axis=-1)
         self._log_data_buffer[:, :-1]["rewards"] = distances[:, :-1] - distances[:, 1:]
         rewards = self._log_data_buffer[:, :-1]["rewards"]
-        pure_target_actions, noisy_target_actions, noise = self.agant.get_action(
+        pure_target_actions, noisy_target_actions, noise = self.agant.get_actions(
             states[:, 1:],
             goals[:, 1:],
             target=True,
@@ -346,65 +347,48 @@ class Procedure(object):
                 goals[:, 1:],
                 target=True,
             )
-        # HINDSIGHT EXPERIENCE (TODO)
-        register_change = (
-            current_goals[:, :-1] != current_goals[:, 1:]
-        ).any(axis=-1)
-        iteration_indices = {
-            i: changes.nonzero()[0]
-            for i, changes in enumerate(register_change) if changes.any()
-        }
+        # HINDSIGHT EXPERIENCE
+        her_goals_per_sim = [
+            np.unique(trajectory_goals, axis=0)
+            for trajectory_goals in current_goals
+        ]
+        her_goals_per_sim = [
+            her_goals[(her_goals != true_goal).any(axis=-1)]
+            for her_goals, true_goal in zip(her_goals_per_sim, goals[:, 0])
+        ]
+        her_goals_per_sim = [
+            her_goals[-self.her_max_replays:]
+            for her_goals in her_goals_per_sim
+        ]
         for_hindsight = []
-        # prediction_error_sum = 0
-        # prediction_error_n = 0
-        # for simulation, changes in iteration_indices.items():
-        #     for iteration in range(self._data_buffer.shape[0]):
-        #         next = np.argmax(changes > iteration)
-        #         if next or changes[0] > iteration:
-        #             for transition_index in changes[next:]:
-        #                 state = self._data_buffer["states"][iteration, simulation]
-        #                 actual_goal = self._data_buffer["current_goals"][transition_index + 1, simulation]
-        #                 prediction = self.agent.get_predictions(
-        #                     state[np.newaxis],
-        #                     actual_goal[np.newaxis]).numpy()[0]
-        #                 prediction = get_time_prediction(
-        #                     prediction,              # 10, 4
-        #                     actual_goal[np.newaxis]  #  1, 4
-        #                 )
-        #                 truth = transition_index - iteration
-        #                 prediction_error_sum += np.abs(prediction - np.clip(truth, 0, self.prediction_time_window))
-        #                 prediction_error_n += 1
-        #                 prediction = int(prediction)
-        #                 if truth < prediction * (1 - self.pessimism):
-        #                     print("YES: sim:{:2d} it:{:2d}  took me {:2d} steps to go from {} to {} at {:2d}, I predicted {:2d} ({:.3f})".format(
-        #                         simulation,
-        #                         iteration,
-        #                         truth,
-        #                         self._data_buffer["current_goals"][transition_index, simulation],
-        #                         actual_goal,
-        #                         transition_index,
-        #                         prediction,
-        #                         prediction * (1 - self.pessimism)))
-        #                     copy = np.copy(self._data_buffer[iteration, simulation])
-        #                     copy["goals"] = actual_goal
-        #                     for_hindsight.append(copy)
-        #                 else:
-        #                     print("NO : sim:{:2d} it:{:2d}  took me {:2d} steps to go from {} to {} at {:2d}, I predicted {:2d} ({:.3f})".format(
-        #                         simulation,
-        #                         iteration,
-        #                         truth,
-        #                         self._data_buffer["current_goals"][transition_index, simulation],
-        #                         actual_goal,
-        #                         transition_index,
-        #                         prediction,
-        #                         prediction * (1 - self.pessimism)))
-        # if len(for_hindsight):
-        #     hindsight_data = np.vstack(for_hindsight)
-        #     self.policy_buffer.integrate(hindsight_data)
-        #     n_discoveries = len(hindsight_data)
-        # else:
-        #     n_discoveries = 0
-        self.n_policy_transition_gathered += n_discoveries
+        for simulation, her_goals in enumerate(her_goals_per_sim):
+            for her_goal in her_goals:
+                her_data = np.copy(self._train_data_buffer[simulation])
+                her_data["goals"] = her_goal
+                tmp_goals = her_data["goals"]
+                tmp_current_goals = her_data["current_goals"]
+                tmp_states = her_data["states"]
+                tmp_distances = np.sum(np.abs(tmp_goals - tmp_current_goals), axis=-1)
+                tmp_rewards = tmp_distances[:-1] - tmp_distances[1:]
+                tmp_target_actions = self.agent.get_actions(
+                    tmp_states[1:],
+                    tmp_goals[1:],
+                    target=True,
+                )
+                her_data["critic_target"] = \
+                    rewards[:-1] + \
+                    self.discount_factor * self.agent.get_return_estimate(
+                        tmp_states,
+                        tmp_target_actions,
+                        tmp_goals,
+                        target=True,
+                    )
+                for_hindsight.append(her_data)
+        # todo: vstack is correct??
+        regular_data = self._train_data_buffer.flatten()
+        buffer_data = np.vstack(for_hindsight + [regular_data])
+        self.policy_buffer.integrate(buffer_data)
+        self.n_policy_transition_gathered += len(buffer_data)
         self.n_policy_episodes += self.n_simulations
         time_stop = time.time()
         if exploration:
@@ -435,6 +419,9 @@ class Procedure(object):
         delta_distance = np.mean(distance_at_start - distance_at_end)
         tb["delta_distance_to_goal"](delta_distance)
         #
+        register_change = (
+            current_goals[:, :-1] != current_goals[:, 1:]
+        ).any(axis=-1)
         n_register_change = np.mean(np.sum(register_change, axis=1))
         tb["n_register_change"](n_register_change)
         #
@@ -470,7 +457,7 @@ class Procedure(object):
         data = self.buffer.sample(self.batch_size)
         losses = self.agent.train(
             data["states"],
-            data["actions"],
+            data["noisy_actions"],
             data["goals"],
             data["critic_targets"],
             data["forward_targets"],

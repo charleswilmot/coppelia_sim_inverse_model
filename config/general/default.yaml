@@ -245,6 +245,8 @@ procedure:
   movement_span_in_sec: 2
   pessimism: 0.3
   log_freq: 1
+  her:
+    max_replays: 4
 
 experiment:
   n_episodes: 8000
