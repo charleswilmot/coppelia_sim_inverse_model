@@ -5,13 +5,11 @@ agent:
   state_size: ???
   action_size: ${simulation.n_joints}
   goal_size: ${simulation.n_registers}
+  target_smoothing_stddev: 0.2
+  tau: 0.001
   exploration:
-    type: ornstein_uhlenbeck
     stddev: 0.1
-    damping: 0.9
-    shape:
-    - ${simulation.n}
-    - ${simulation.n_joints}
+    n: 50
 
   policy_model_arch:
     backend: tensorflow

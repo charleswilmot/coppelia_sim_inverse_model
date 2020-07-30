@@ -1,6 +1,5 @@
 import tensorflow as tf
 from tensorflow import keras
-from ornstein_uhlenbeck import OUProcess
 
 
 def model_copy(model, fake_inp):
@@ -12,11 +11,30 @@ def model_copy(model, fake_inp):
     return clone
 
 
+@tf.function
+def to_matching_shape(*args):
+    ranks = [t.ndim for t in args]
+    rank_2 = [r == 2 for r in ranks]
+    rank_3 = [r == 3 for r in ranks]
+    n_rank_2 = rank_2.count(True)
+    n_rank_3 = rank_3.count(True)
+    ret = []
+    if n_rank_2 and n_rank_3:
+        axis_1_size = args[rank_3.index(True)].shape[1]
+        for rank, tensor in zip(ranks, args):
+            if rank == 2:
+                tensor = tf.stack([tensor for i in range(axis_1_size)], axis=1)
+            ret.append(tensor)
+    return ret
+
+
 class Agent(object):
     def __init__(self,
             policy_learning_rate, policy_model_arch,
             critic_learning_rate, critic_model_arch,
-            exploration, state_size, action_size, goal_size):
+            forward_learning_rate, forward_model_arch,
+            exploration, target_smoothing_stddev, tau,
+            state_size, action_size, goal_size):
         #   POLICY
         self.policy_learning_rate = policy_learning_rate
         self.policy_model = keras.models.model_from_yaml(
@@ -46,16 +64,11 @@ class Agent(object):
         self.forward_optimizer = keras.optimizers.Adam(self.forward_learning_rate)
         #   EXPLORATION NOISE
         self.exploration_params = exploration
-        self.exploration_type = exploration.type
         self.exploration_stddev = exploration.stddev
-        self.exploration_damping = exploration.damping
-        self.exploration_shape = exploration.shape
-        self.ou_process = OUProcess(
-            shape=self.exploration_shape,
-            damping=self.exploration_damping,
-            stddev=self.exploration_stddev
-        )
-        self._action_shape = action_shape.to_container(resolve=True)
+        self.exploration_n = exploration.n
+        #   TD3
+        self.target_smoothing_stddev = target_smoothing_stddev
+        self.tau = tau
 
     def save_weights(self, path):
         self.policy_model.save_weights(path + "/policy_model")
@@ -76,10 +89,23 @@ class Agent(object):
         return self.ou_process()
 
     @tf.function
-    def get_actions(self, states, goals, exploration=False):
-        pure_actions = self.policy_model(states, goals)
+    def get_actions(self, states, goals, exploration=False, target=False):
+        states, goals = to_matching_shape(states, goals)
+        if target:
+            exploration = True
+            stddev = self.target_smoothing_stddev
+            pure_actions = self.target_policy_model(states, goals)
+            shape = tf.shape(pure_actions)
+        else:
+            stddev = self.exploration_stddev
+            pure_actions = self.policy_model(states, goals)
+            shape = tf.shape(pure_actions)
+            shape = tf.concat([shape[:1], [self.exploration_n], shape[1:]], axis=0)
         if exploration:
-            noises = self.get_noise()
+            noises = tf.random.truncated_normal(
+                shape=tf.shape(pure_actions),
+                stddev=self.target_smoothing_stddev,
+            )
             noisy_actions = tf.clip_by_value(
                 pure_actions + noises,
                 clip_value_min=-1,
@@ -92,11 +118,13 @@ class Agent(object):
 
     @tf.function
     def get_predictions(self, states, actions):
+        states, actions = to_matching_shape(states, actions)
         inps = tf.concat([states, actions], axis=-1)
         return self.forward_model(inps)
 
     @tf.function
     def get_return_estimate(self, states, actions, goals, target=False):
+        states, actions, goals = to_matching_shape(states, actions, goals)
         inps = tf.concat([states, actions, goals])
         if target:
             target_0 = self.target_critic_model_0(inps)
@@ -147,8 +175,8 @@ class Agent(object):
         for model, target in model_target_pairs:
             for model_var, target_var in zip(model.variables, target.variables):
                 target_var.assign(
-                    (1 - self.td3_tau) * target_var +
-                    self.td3_tau * model_var
+                    (1 - self.tau) * target_var +
+                    self.tau * model_var
                 )
 
     @tf.function

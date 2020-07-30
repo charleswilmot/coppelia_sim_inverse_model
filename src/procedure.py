@@ -294,19 +294,16 @@ class Procedure(object):
             predicted_next_states = self.agent.get_predictions(
                 states,
                 noisy_actions,
-                multiple_actions_per_state=True, # todo implement this in agent
             )
             next_pure_actions = self.agent.get_actions(
                 predicted_next_states,
                 goals,
                 exploration=False,
-                multiple_states_per_goal=True # todo implement this in agent
             )
             next_return_estimate = self.agent.get_return_estimate(
                 predicted_next_states,
                 next_pure_actions,
                 goals,
-                multiple_states_and_actions_per_goal=True # todo implement this in agent
             )
             indices_best = np.argmax(next_return_estimate.numpy(), axis=-1)
             best_noisy_actions = noisy_actions[:, indices_best]
@@ -336,14 +333,18 @@ class Procedure(object):
         distances = np.sum(np.abs(goals - current_goals), axis=-1)
         self._log_data_buffer[:, :-1]["rewards"] = distances[:, :-1] - distances[:, 1:]
         rewards = self._log_data_buffer[:, :-1]["rewards"]
+        pure_target_actions, noisy_target_actions, noise = self.agant.get_action(
+            states[:, 1:],
+            goals[:, 1:],
+            target=True,
+        )
         self._train_data_buffer[:, :-1]["critic_targets"] = \
             rewards[:, :-1] + \
             self.discount_factor * self.agent.get_return_estimate(
                 states[:, 1:],
-                actions[:, 1:],
+                target_actions,
                 goals[:, 1:],
                 target=True,
-                double_batch_dim=True # todo implement this in agent
             )
         # HINDSIGHT EXPERIENCE (TODO)
         register_change = (
