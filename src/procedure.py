@@ -165,10 +165,8 @@ class Procedure(object):
 
     def dump_buffers(self):
         os.makedirs('./buffers', exist_ok=True)
-        path = "./buffers/critic_{:6d}.pkl".format(self.n_critic_training)
-        self.critic_buffer.dump(path)
-        path = "./buffers/policy_{:6d}.pkl".format(self.n_policy_training)
-        self.policy_buffer.dump(path)
+        path = "./buffers/buffer_{:6d}.pkl".format(self.n_critic_training)
+        self.buffer.dump(path)
 
     def log_metrics(self, key1, key2, step):
         with self.summary_writer.as_default():
@@ -288,9 +286,8 @@ class Procedure(object):
                 writer.close()
                 self.simulation_pool.delete_camera(cam_id)
 
-    def collect_data(self, exploration=True):
-        """Performs one episode of exploration, places data in the policy
-        buffer"""
+    def collect_data(self):
+        """Performs one episode of exploration, places data in the buffer"""
         goals = self.sample_goals()
         states, current_goals = self.reset_simulations()
         time_start = time.time()
@@ -365,39 +362,48 @@ class Procedure(object):
             for her_goal in her_goals:
                 her_data = np.copy(self._train_data_buffer[simulation])
                 her_data["goals"] = her_goal
-                tmp_goals = her_data["goals"]
-                tmp_current_goals = her_data["current_goals"]
-                tmp_states = her_data["states"]
-                tmp_distances = np.sum(np.abs(tmp_goals - tmp_current_goals), axis=-1)
-                tmp_rewards = tmp_distances[:-1] - tmp_distances[1:]
-                tmp_target_actions = self.agent.get_actions(
-                    tmp_states[1:],
-                    tmp_goals[1:],
+                goals = her_data["goals"]
+                current_goals = her_data["current_goals"]
+                states = her_data["states"]
+                distances = np.sum(np.abs(goals - current_goals), axis=-1)
+                rewards = distances[:-1] - distances[1:]
+                target_actions = self.agent.get_actions(
+                    states[1:],
+                    goals[1:],
                     target=True,
                 )
                 her_data["critic_target"] = \
                     rewards[:-1] + \
                     self.discount_factor * self.agent.get_return_estimate(
-                        tmp_states,
-                        tmp_target_actions,
-                        tmp_goals,
+                        states,
+                        target_actions,
+                        goals,
                         target=True,
                     )
                 for_hindsight.append(her_data)
         # todo: vstack is correct??
         regular_data = self._train_data_buffer.flatten()
         buffer_data = np.vstack(for_hindsight + [regular_data])
-        self.policy_buffer.integrate(buffer_data)
+        self.buffer.integrate(buffer_data)
         self.n_policy_transition_gathered += len(buffer_data)
         self.n_policy_episodes += self.n_simulations
         time_stop = time.time()
+        # LOG METRICS
+        self.accumulate_log_data(
+            goals=self._train_data_buffer["goals"],
+            current_goals=self._log_data_buffer["current_goals"],
+            time=time_stop - time_start,
+            exploration=True,
+        )
+
+    def accumulate_log_data(goals, current_goals, time, exploration):
         if exploration:
             tb = self.tb["collection"]["exploration"]
         else:
             tb = self.tb["collection"]["evaluation"]
         #
         n_iterations = self.episode_length * self.n_simulations
-        it_per_sec = n_iterations / (time_stop - time_start)
+        it_per_sec = n_iterations / time
         tb["it_per_sec"](it_per_sec)
         #
         goal_reached = (goals == current_goals).all(axis=-1)
