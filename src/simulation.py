@@ -864,10 +864,11 @@ if __name__ == '__main__':
     def test_8():
         simulation = SimulationProducer(
             scene='',
-            guis=False
+            gui=False
         )
         simulation.create_environment('one_arm_2_buttons_1_levers_1_tap')
         simulation.start_sim()
+        simulation.step_sim()
         state = simulation.get_state()
         print(state.shape)
         simulation.stop_sim()

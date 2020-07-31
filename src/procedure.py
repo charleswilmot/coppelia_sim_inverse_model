@@ -40,11 +40,13 @@ class Procedure(object):
             ("policy_update_rate", procedure_conf.policy_updates_per_sample),
             ("critic_update_rate", procedure_conf.critic_updates_per_sample),
             ("forward_update_rate", procedure_conf.forward_updates_per_sample),
+            ("forward_update_rate", procedure_conf.forward_updates_per_sample),
             ("ep_length", procedure_conf.episode_length),
             ("batch_size", procedure_conf.batch_size),
-            ("noise_type", agent_conf.exploration.type),
             ("noise_std", agent_conf.exploration.stddev),
-            ("noise_damp", agent_conf.exploration.damping),
+            ("noise_n", agent_conf.exploration.n),
+            ("tau", agent_conf.tau),
+            ("target_smoothing", agent_conf.target_smoothing_stddev),
             ("movement_mode", procedure_conf.movement_mode),
             ("movement_span", procedure_conf.movement_span_in_sec),
         ])
@@ -82,7 +84,6 @@ class Procedure(object):
         print("self.goal_size", self.goal_size)
         print("self.state_size", self.state_size)
         print("self.action_size", self.action_size)
-        print("self.prediction_size", self.prediction_size)
 
         #   DEFINING DATA BUFFERS
         # training
@@ -309,6 +310,7 @@ class Procedure(object):
         goals = self.sample_goals()
         states, current_goals = self.reset_simulations()
         time_start = time.time()
+        sims = np.arange(self.n_simulations)
         for iteration in range(self.episode_length):
             pure_actions, noisy_actions, noises = self.agent.get_actions(
                 states, goals, exploration=True)
@@ -326,10 +328,10 @@ class Procedure(object):
                 next_pure_actions,
                 goals,
             )
-            indices_best = np.argmax(next_return_estimate.numpy(), axis=-1)
-            best_noisy_actions = noisy_actions[:, indices_best]
-            best_predicted_next_states = predicted_next_states[:, indices_best]
-            best_next_pure_actions = next_pure_actions[:, indices_best]
+            indices_best = np.argmax(next_return_estimate.numpy(), axis=1).flatten()
+            best_noisy_actions = noisy_actions.numpy()[sims, indices_best]
+            best_predicted_next_states = predicted_next_states.numpy()[sims, indices_best]
+            best_next_pure_actions = next_pure_actions.numpy()[sims, indices_best]
             self._train_data_buffer[:, iteration]["states"] = states
             self._train_data_buffer[:, iteration]["noisy_actions"] = best_noisy_actions
             self._train_data_buffer[:, iteration]["goals"] = goals
@@ -349,7 +351,7 @@ class Procedure(object):
         distances = np.sum(np.abs(goals - current_goals), axis=-1)
         self._log_data_buffer[:, :-1]["rewards"] = distances[:, :-1] - distances[:, 1:]
         rewards = self._log_data_buffer[:, :-1]["rewards"]
-        pure_target_actions, noisy_target_actions, noise = self.agant.get_actions(
+        pure_target_actions, noisy_target_actions, noise = self.agent.get_actions(
             states[:, 1:],
             goals[:, 1:],
             target=True,

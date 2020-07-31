@@ -1,9 +1,10 @@
 import tensorflow as tf
 from tensorflow import keras
+import numpy as np
 
 
 def model_copy(model, fake_inp):
-    clone = model.clone_model()
+    clone = keras.models.clone_model(model)
     fake_out = model(fake_inp)
     fake_out = clone(fake_inp)
     for model_var, clone_var in zip(model.variables, clone.variables):
@@ -13,7 +14,10 @@ def model_copy(model, fake_inp):
 
 @tf.function
 def to_matching_shape(*args):
-    ranks = [t.ndim for t in args]
+    for t in args:
+        print(t.get_shape(), len(t.get_shape()))
+    print("###")
+    ranks = [len(t.get_shape()) for t in args]
     rank_2 = [r == 2 for r in ranks]
     rank_3 = [r == 3 for r in ranks]
     n_rank_2 = rank_2.count(True)
@@ -25,7 +29,17 @@ def to_matching_shape(*args):
             if rank == 2:
                 tensor = tf.stack([tensor for i in range(axis_1_size)], axis=1)
             ret.append(tensor)
-    return ret
+        for t in ret:
+            print(t.get_shape(), len(t.get_shape()))
+        print("###")
+        print("")
+        return ret
+    else:
+        for t in args:
+            print(t.get_shape(), len(t.get_shape()))
+        print("### (nothing done)")
+        print("")
+        return args
 
 
 class Agent(object):
@@ -38,7 +52,7 @@ class Agent(object):
         #   POLICY
         self.policy_learning_rate = policy_learning_rate
         self.policy_model = keras.models.model_from_yaml(
-            policy_model_arch.pretty())
+            policy_model_arch.pretty(resolve=True))
         fake_inp = np.zeros(
             shape=(1, state_size + goal_size),
             dtype=np.float32
@@ -48,8 +62,8 @@ class Agent(object):
         #   CRITIC
         self.critic_learning_rate = critic_learning_rate
         self.critic_model_0 = keras.models.model_from_yaml(
-            critic_model_arch.pretty())
-        self.critic_model_1 = self.critic_model_0.clone_model()
+            critic_model_arch.pretty(resolve=True))
+        self.critic_model_1 = keras.models.clone_model(self.critic_model_0)
         fake_inp = np.zeros(
             shape=(1, state_size + goal_size + action_size),
             dtype=np.float32
@@ -60,7 +74,7 @@ class Agent(object):
         #   FORWARD
         self.forward_learning_rate = forward_learning_rate
         self.forward_model = keras.models.model_from_yaml(
-            forward_model_arch.pretty())
+            forward_model_arch.pretty(resolve=True))
         self.forward_optimizer = keras.optimizers.Adam(self.forward_learning_rate)
         #   EXPLORATION NOISE
         self.exploration_params = exploration
@@ -85,33 +99,36 @@ class Agent(object):
         self.target_critic_model_1.load_weights(path + "/target_critic_model_1")
 
     @tf.function
-    def get_noise(self):
-        return self.ou_process()
-
-    @tf.function
     def get_actions(self, states, goals, exploration=False, target=False):
         states, goals = to_matching_shape(states, goals)
+        inps = tf.concat([states, tf.cast(goals, tf.float32)], axis=-1)
         if target:
             exploration = True
             stddev = self.target_smoothing_stddev
-            pure_actions = self.target_policy_model(states, goals)
+            pure_actions = self.target_policy_model(inps)
             shape = tf.shape(pure_actions)
+            broadcast_actions = False
         else:
             stddev = self.exploration_stddev
-            pure_actions = self.policy_model(states, goals)
+            pure_actions = self.policy_model(inps)
             shape = tf.shape(pure_actions)
             shape = tf.concat([shape[:1], [self.exploration_n], shape[1:]], axis=0)
+            broadcast_actions = True
         if exploration:
             noises = tf.random.truncated_normal(
-                shape=tf.shape(pure_actions),
-                stddev=self.target_smoothing_stddev,
+                shape=shape,
+                stddev=stddev,
             )
+            if broadcast_actions:
+                pure_actions_reshaped = pure_actions[:, tf.newaxis]
+            else:
+                pure_actions_reshaped = pure_actions
             noisy_actions = tf.clip_by_value(
-                pure_actions + noises,
+                pure_actions_reshaped + noises,
                 clip_value_min=-1,
                 clip_value_max=1
             )
-            noises = noisy_actions - pure_actions
+            noises = noisy_actions - pure_actions_reshaped
             return pure_actions, noisy_actions, noises
         else:
             return pure_actions
@@ -125,7 +142,7 @@ class Agent(object):
     @tf.function
     def get_return_estimates(self, states, actions, goals, target=False):
         states, actions, goals = to_matching_shape(states, actions, goals)
-        inps = tf.concat([states, actions, goals])
+        inps = tf.concat([states, actions, tf.cast(goals, tf.float32)], axis=-1)
         if target:
             target_0 = self.target_critic_model_0(inps)
             target_1 = self.target_critic_model_1(inps)

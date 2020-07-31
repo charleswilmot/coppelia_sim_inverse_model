@@ -14,17 +14,17 @@ def main(cfg):
 def experiment(cfg):
     print(cfg.pretty(), end="\n\n\n")
     agent_conf = cfg.agent
-    policy_buffer_conf = cfg.policy_buffer
-    critic_buffer_conf = cfg.critic_buffer
+    buffer_conf = cfg.buffer
     simulation_conf = cfg.simulation
     procedure_conf = cfg.procedure
     experiment_conf = cfg.experiment
-    with Procedure(agent_conf, policy_buffer_conf, critic_buffer_conf,
-            simulation_conf, procedure_conf) as procedure:
+    with Procedure(agent_conf, buffer_conf, simulation_conf, procedure_conf) as procedure:
         n_episode_batch = experiment_conf.n_episodes // simulation_conf.n
         for episode_batch in range(n_episode_batch):
             policy = (episode_batch + 1) % experiment_conf.policy_every == 0
             critic = (episode_batch + 1) % experiment_conf.critic_every == 0
+            forward = (episode_batch + 1) % experiment_conf.forward_every == 0
+            evaluation = (episode_batch + 1) % experiment_conf.evaluate_every == 0
             save = (episode_batch + 1) % experiment_conf.save_every == 0
             record = (episode_batch + 1) % experiment_conf.record_episode_every == 0
             dump_buffers = episode_batch in experiment_conf.dump_buffers_at
@@ -37,7 +37,7 @@ def experiment(cfg):
                 record,
                 dump_buffers
             ))
-            procedure.gather_train_and_log(policy=policy, critic=critic)
+            procedure.collect_train_and_log(policy=policy, critic=critic, forward=forward, evaluation=evaluation)
             if save:
                 procedure.save()
             if record:

@@ -2,7 +2,7 @@ agent:
   policy_learning_rate: 1e-3
   critic_learning_rate: 1e-3
   forward_learning_rate: 1e-3
-  state_size: ???
+  state_size: 25
   action_size: ${simulation.n_joints}
   goal_size: ${simulation.n_registers}
   target_smoothing_stddev: 0.2
@@ -216,11 +216,7 @@ agent:
     keras_version: 2.3.0-tf
 
 
-policy_buffer:
-  size: 10000
-
-
-critic_buffer:
+buffer:
   size: 10000
 
 
@@ -238,6 +234,7 @@ procedure:
   batch_size: 64
   critic_updates_per_sample: 40
   policy_updates_per_sample: 40
+  forward_updates_per_sample: 40
   prediction_filter_lookup: 3
   simulation_timestep: 0.2
   visualize: False
@@ -252,6 +249,8 @@ experiment:
   n_episodes: 8000
   policy_every: 1
   critic_every: 1
+  forward_every: 1
+  evaluate_every: 10
   record_episode_every: 10
   save_every: 100
   final_recording: True
