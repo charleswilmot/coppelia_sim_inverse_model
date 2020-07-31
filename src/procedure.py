@@ -85,7 +85,7 @@ class Procedure(object):
         print("self.prediction_size", self.prediction_size)
 
         #   DEFINING DATA BUFFERS
-        # policy
+        # training
         self._train_data_type = np.dtype([
             ("states", np.float32, self.state_size),
             ("noisy_actions", np.float32, self.action_size),
@@ -97,6 +97,7 @@ class Procedure(object):
             shape=(self.n_simulations, self.episode_length),
             dtype=self._train_data_type
         )
+        # logging (complements training)
         self._log_data_type = np.dtype([
             ("current_goals", np.float32, self.goal_size),
             ("pure_actions", np.float32, self.action_size),
@@ -108,6 +109,23 @@ class Procedure(object):
             shape=(self.n_simulations, self.episode_length),
             dtype=self._log_data_type
         )
+        # evaluation
+        self._evaluation_data_type = np.dtype([
+            ("states", np.float32, self.state_size),
+            ("goals", np.float32, self.goal_size),
+            ("current_goals", np.float32, self.goal_size),
+            ("pure_actions", np.float32, self.action_size),
+            ("predicted_next_states", np.float32, self.state_size),
+            ("return_estimates", np.float32),
+            ("forward_targets", np.float32, self.state_size),
+            ("rewards", np.float32),
+            ("critic_targets", np.float32),
+        ])
+        self._evaluation_data_buffer = np.zeros(
+            shape=(self.n_simulations, self.episode_length),
+            dtype=self._evaluation_data_type
+        )
+
         # COUNTERS
         self.n_exploration_episodes = 0
         self.n_evaluation_episodes = 0
@@ -303,7 +321,7 @@ class Procedure(object):
                 goals,
                 exploration=False,
             )
-            next_return_estimate = self.agent.get_return_estimate(
+            next_return_estimate = self.agent.get_return_estimates(
                 predicted_next_states,
                 next_pure_actions,
                 goals,
@@ -338,7 +356,7 @@ class Procedure(object):
         )
         self._train_data_buffer[:, :-1]["critic_targets"] = \
             rewards[:, :-1] + \
-            self.discount_factor * self.agent.get_return_estimate(
+            self.discount_factor * self.agent.get_return_estimates(
                 states[:, 1:],
                 target_actions,
                 goals[:, 1:],
@@ -374,7 +392,7 @@ class Procedure(object):
                 )
                 her_data["critic_target"] = \
                     rewards[:-1] + \
-                    self.discount_factor * self.agent.get_return_estimate(
+                    self.discount_factor * self.agent.get_return_estimates(
                         states,
                         target_actions,
                         goals,
@@ -394,6 +412,55 @@ class Procedure(object):
             current_goals=self._log_data_buffer["current_goals"],
             time=time_stop - time_start,
             exploration=True,
+        )
+
+    def evaluate(self):
+        """Performs one episode of evaluation"""
+        goals = self.sample_goals()
+        states, current_goals = self.reset_simulations()
+        time_start = time.time()
+        for iteration in range(self.episode_length):
+            pure_actions = self.agent.get_actions(
+                states, goals, exploration=False)
+            self._evaluation_data_buffer[:, iteration]["states"] = states
+            self._evaluation_data_buffer[:, iteration]["goals"] = goals
+            self._evaluation_data_buffer[:, iteration]["current_goals"] = current_goals
+            self._evaluation_data_buffer[:, iteration]["pure_actions"] = pure_actions
+            states, current_goals = self.apply_action(pure_actions)
+        states = self._evaluation_data_buffer["states"]
+        pure_actions = self._evaluation_data_buffer["pure_actions"]
+        goals = self._evaluation_data_buffer["goals"]
+        current_goals = self._evaluation_data_buffer["current_goals"]
+        # BATCH PROCESSING
+        predicted_next_states = self.agent.get_predictions(
+            states, pure_actions)
+        return_estimates = self.agent.get_return_estimates(
+            states, pure_actions, goals)
+        self._evaluation_data_buffer["predicted_next_states"] = \
+            predicted_next_states
+        self._evaluation_data_buffer["return_estimate"] = \
+            return_estimate
+        # COMPUTE TARGETS
+        # forward target (valid until :-1)
+        states = self._evaluation_data_buffer["states"]
+        self._evaluation_data_buffer[:, :-1]["forward_targets"] = states[:, 1:]
+        # critic target (valid until :-1)
+        distances = np.sum(np.abs(goals - current_goals), axis=-1)
+        self._evaluation_data_buffer[:, :-1]["rewards"] = distances[:, :-1] - distances[:, 1:]
+        rewards = self._evaluation_data_buffer[:, :-1]["rewards"]
+        n_steps_return_estimates = return_estimates[:, -1]
+        for iteration in np.arange(self.episode_length - 2, -1, -1):
+            n_steps_return_estimates = rewards[:, iteration] + \
+                self.discount_factor * n_steps_return_estimates
+            self._evaluation_data_buffer[:, iteration]["critic_targets"] = \
+                n_steps_return_estimates
+        time_stop = time.time()
+        # LOG METRICS
+        self.accumulate_log_data(
+            goals=self._evaluation_data_buffer["goals"],
+            current_goals=self._evaluation_data_buffer["current_goals"],
+            time=time_stop - time_start,
+            exploration=False,
         )
 
     def accumulate_log_data(goals, current_goals, time, exploration):
@@ -485,7 +552,7 @@ class Procedure(object):
         return losses
 
     def collect_and_train(self, policy=True, critic=True, forward=True):
-        self.collect_data(exploration=True)
+        self.collect_data()
         while self.current_training_ratio < self.updates_per_sample:
             self.train(policy=policy, critic=critic, forward=forward)
 
@@ -493,7 +560,7 @@ class Procedure(object):
             evaluation=False):
         self.collect_and_train(policy=policy, critic=critic, forward=forward)
         if evaluation:
-            self.collect_data(exploration=False)
+            self.evaluate()
         if self.n_global_training % self.log_freq == 0:
             self.log_summaries(exploration=True, evaluation=evaluation,
                 policy=policy, critic=critic, forward=forward)

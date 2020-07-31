@@ -123,7 +123,7 @@ class Agent(object):
         return self.forward_model(inps)
 
     @tf.function
-    def get_return_estimate(self, states, actions, goals, target=False):
+    def get_return_estimates(self, states, actions, goals, target=False):
         states, actions, goals = to_matching_shape(states, actions, goals)
         inps = tf.concat([states, actions, goals])
         if target:
@@ -136,7 +136,7 @@ class Agent(object):
     @tf.function
     def train_critic(self, states, actions, goals, targets):
         with tf.GradientTape() as tape:
-            estimates = self.get_return_estimate(states, actions, goals)
+            estimates = self.get_return_estimates(states, actions, goals)
             loss = keras.losses.Huber()(estimates, tf.stop_gradient(targets))
             vars = self.critic_model_0.variables + self.critic_model_1.variables
             grads = tape.gradient(loss, vars)
@@ -147,7 +147,7 @@ class Agent(object):
     def train_policy(self, states, goals):
         with tf.GradientTape() as tape:
             actions = self.get_actions(states, goals, exploration=False)
-            estimates = self.get_return_estimate(states, actions, goals)
+            estimates = self.get_return_estimates(states, actions, goals)
             loss = - tf.reduce_sum(estimates)
             vars = self.policy_model.variables
             grads = tape.gradient(loss, vars)
