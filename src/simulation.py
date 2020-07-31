@@ -861,4 +861,16 @@ if __name__ == '__main__':
         simulations.stop_sim()
         simulations.close()
 
-    test_7(6)
+    def test_8():
+        simulation = SimulationProducer(
+            scene='',
+            guis=False
+        )
+        simulation.create_environment('one_arm_2_buttons_1_levers_1_tap')
+        simulation.start_sim()
+        state = simulation.get_state()
+        print(state.shape)
+        simulation.stop_sim()
+        simulation.close()
+
+    test_8()
