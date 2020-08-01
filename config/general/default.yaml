@@ -232,10 +232,8 @@ simulation:
 procedure:
   episode_length: 100
   batch_size: 64
-  critic_updates_per_sample: 40
-  policy_updates_per_sample: 40
-  forward_updates_per_sample: 40
-  prediction_filter_lookup: 3
+  discount_factor: 0.95
+  updates_per_sample: 40
   simulation_timestep: 0.2
   visualize: False
   movement_mode: minimalist

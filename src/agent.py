@@ -14,14 +14,12 @@ def model_copy(model, fake_inp):
 
 @tf.function
 def to_matching_shape(*args):
-    for t in args:
-        print(t.get_shape(), len(t.get_shape()))
-    print("###")
     ranks = [len(t.get_shape()) for t in args]
     rank_2 = [r == 2 for r in ranks]
     rank_3 = [r == 3 for r in ranks]
     n_rank_2 = rank_2.count(True)
     n_rank_3 = rank_3.count(True)
+    print("tracing with {} rank 2 and {} rank 3".format(n_rank_2, n_rank_3))
     ret = []
     if n_rank_2 and n_rank_3:
         axis_1_size = args[rank_3.index(True)].shape[1]
@@ -29,16 +27,8 @@ def to_matching_shape(*args):
             if rank == 2:
                 tensor = tf.stack([tensor for i in range(axis_1_size)], axis=1)
             ret.append(tensor)
-        for t in ret:
-            print(t.get_shape(), len(t.get_shape()))
-        print("###")
-        print("")
         return ret
     else:
-        for t in args:
-            print(t.get_shape(), len(t.get_shape()))
-        print("### (nothing done)")
-        print("")
         return args
 
 
@@ -199,15 +189,15 @@ class Agent(object):
     @tf.function
     def train(self, states, actions, goals, critic_target, forward_target,
             policy=True, critic=True, forward=True):
+        losses = {}
         if critic:
             critic_loss = self.train_critic(states, actions, goals, critic_target)
+            losses["critic"] = critic_loss
         if forward:
             forward_loss = self.train_forward(states, actions, forward_target)
+            losses["forward"] = forward_loss
         if policy:
             policy_loss = self.train_policy(states, goals)
+            losses["policy"] = policy_loss
         self.update_targets()
-        return {
-            "critic_loss": critic_loss,
-            "forward_loss": forward_loss,
-            "policy_loss": policy_loss,
-        }
+        return losses

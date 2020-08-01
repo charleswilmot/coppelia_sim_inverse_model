@@ -16,9 +16,7 @@ class Procedure(object):
     def __init__(self, agent_conf, buffer_conf, simulation_conf, procedure_conf):
         #   PROCEDURE CONF
         self.episode_length = procedure_conf.episode_length
-        self.critic_updates_per_sample = procedure_conf.critic_updates_per_sample
-        self.policy_updates_per_sample = procedure_conf.policy_updates_per_sample
-        self.forward_updates_per_sample = procedure_conf.forward_updates_per_sample
+        self.updates_per_sample = procedure_conf.updates_per_sample
         self.batch_size = procedure_conf.batch_size
         self.n_simulations = simulation_conf.n
         self.log_freq = procedure_conf.log_freq
@@ -32,15 +30,13 @@ class Procedure(object):
             self.movement_span for i in range(self.n_simulations)
         ]
         self.her_max_replays = procedure_conf.her.max_replays
+        self.discount_factor = procedure_conf.discount_factor
         #    HPARAMS
         self._hparams = OrderedDict([
             ("policy_LR", agent_conf.policy_learning_rate),
             ("critic_LR", agent_conf.critic_learning_rate),
             ("buffer", buffer_conf.size),
-            ("policy_update_rate", procedure_conf.policy_updates_per_sample),
-            ("critic_update_rate", procedure_conf.critic_updates_per_sample),
-            ("forward_update_rate", procedure_conf.forward_updates_per_sample),
-            ("forward_update_rate", procedure_conf.forward_updates_per_sample),
+            ("update_rate", procedure_conf.updates_per_sample),
             ("ep_length", procedure_conf.episode_length),
             ("batch_size", procedure_conf.batch_size),
             ("noise_std", agent_conf.exploration.stddev),
@@ -357,13 +353,12 @@ class Procedure(object):
             target=True,
         )
         self._train_data_buffer[:, :-1]["critic_targets"] = \
-            rewards[:, :-1] + \
-            self.discount_factor * self.agent.get_return_estimates(
+            rewards + self.discount_factor * self.agent.get_return_estimates(
                 states[:, 1:],
-                target_actions,
+                noisy_target_actions,
                 goals[:, 1:],
                 target=True,
-            )
+            )[..., 0]
         # HINDSIGHT EXPERIENCE
         her_goals_per_sim = [
             np.unique(trajectory_goals, axis=0)
@@ -383,30 +378,28 @@ class Procedure(object):
                 her_data = np.copy(self._train_data_buffer[simulation])
                 her_data["goals"] = her_goal
                 goals = her_data["goals"]
-                current_goals = her_data["current_goals"]
+                current_goals = self._log_data_buffer[simulation]["current_goals"]
                 states = her_data["states"]
                 distances = np.sum(np.abs(goals - current_goals), axis=-1)
                 rewards = distances[:-1] - distances[1:]
-                target_actions = self.agent.get_actions(
+                pure_target_actions, noisy_target_actions, noise = self.agent.get_actions(
                     states[1:],
                     goals[1:],
                     target=True,
                 )
-                her_data["critic_target"] = \
-                    rewards[:-1] + \
-                    self.discount_factor * self.agent.get_return_estimates(
-                        states,
-                        target_actions,
-                        goals,
+                her_data[:-1]["critic_targets"] = \
+                    rewards + self.discount_factor * self.agent.get_return_estimates(
+                        states[1:],
+                        noisy_target_actions,
+                        goals[1:],
                         target=True,
-                    )
-                for_hindsight.append(her_data)
-        # todo: vstack is correct??
-        regular_data = self._train_data_buffer.flatten()
-        buffer_data = np.vstack(for_hindsight + [regular_data])
+                    )[..., 0]
+                for_hindsight.append(her_data[:-1])
+        regular_data = self._train_data_buffer[:, :-1].flatten()
+        buffer_data = np.concatenate(for_hindsight + [regular_data], axis=0)
         self.buffer.integrate(buffer_data)
-        self.n_policy_transition_gathered += len(buffer_data)
-        self.n_policy_episodes += self.n_simulations
+        self.n_transition_gathered += len(buffer_data)
+        self.n_exploration_episodes += self.n_simulations
         time_stop = time.time()
         # LOG METRICS
         self.accumulate_log_data(
@@ -440,8 +433,8 @@ class Procedure(object):
             states, pure_actions, goals)
         self._evaluation_data_buffer["predicted_next_states"] = \
             predicted_next_states
-        self._evaluation_data_buffer["return_estimate"] = \
-            return_estimate
+        self._evaluation_data_buffer["return_estimates"] = \
+            return_estimates
         # COMPUTE TARGETS
         # forward target (valid until :-1)
         states = self._evaluation_data_buffer["states"]
@@ -456,6 +449,7 @@ class Procedure(object):
                 self.discount_factor * n_steps_return_estimates
             self._evaluation_data_buffer[:, iteration]["critic_targets"] = \
                 n_steps_return_estimates
+        self.n_evaluation_episodes += self.n_simulations
         time_stop = time.time()
         # LOG METRICS
         self.accumulate_log_data(
@@ -465,7 +459,7 @@ class Procedure(object):
             exploration=False,
         )
 
-    def accumulate_log_data(goals, current_goals, time, exploration):
+    def accumulate_log_data(self, goals, current_goals, time, exploration):
         if exploration:
             tb = self.tb["collection"]["exploration"]
         else:
