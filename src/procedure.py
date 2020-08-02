@@ -12,6 +12,14 @@ from tensorboard.plugins.hparams import api as hp
 from imageio import get_writer
 
 
+def get_snr_db(signal, noise, axis=1):
+    mean_signal = np.mean(signal, axis=axis, keepdims=True)
+    mean_noise = np.mean(noise, axis=axis, keepdims=True)
+    rms_signal_db = np.log10(np.std(signal - mean_signal, axis=axis))
+    rms_noise_db = np.log10(np.std(noise - mean_noise, axis=axis))
+    return 20 * (rms_signal_db - rms_noise_db)
+
+
 class Procedure(object):
     def __init__(self, agent_conf, buffer_conf, simulation_conf, procedure_conf):
         #   PROCEDURE CONF
@@ -101,6 +109,7 @@ class Procedure(object):
             ("next_pure_actions", np.float32, self.action_size),
             ("predicted_next_states", np.float32, self.state_size),
             ("rewards", np.float32),
+            ("target_return_estimates", np.float32),
         ])
         self._log_data_buffer = np.zeros(
             shape=(self.n_simulations, self.episode_length),
@@ -171,6 +180,14 @@ class Procedure(object):
             "collection/exploration_one_away_sucess_rate", dtype=tf.float32)
         self.tb["collection"]["evaluation"]["one_away_sucess_rate"] = Mean(
             "collection/evaluation_one_away_sucess_rate", dtype=tf.float32)
+        self.tb["collection"]["exploration"]["forward_snr"] = Mean(
+            "collection/exploration_forward_snr_db", dtype=tf.float32)
+        self.tb["collection"]["evaluation"]["forward_snr"] = Mean(
+            "collection/evaluation_forward_snr_db", dtype=tf.float32)
+        self.tb["collection"]["exploration"]["critic_snr"] = Mean(
+            "collection/exploration_critic_snr_db", dtype=tf.float32)
+        self.tb["collection"]["evaluation"]["critic_snr"] = Mean(
+            "collection/evaluation_critic_snr_db", dtype=tf.float32)
         #
         self.summary_writer = tf.summary.create_file_writer("logs")
         with self.summary_writer.as_default():
@@ -346,19 +363,21 @@ class Procedure(object):
         # critic target (valid until :-1)
         distances = np.sum(np.abs(goals - current_goals), axis=-1)
         self._log_data_buffer[:, :-1]["rewards"] = distances[:, :-1] - distances[:, 1:]
-        rewards = self._log_data_buffer[:, :-1]["rewards"]
         pure_target_actions, noisy_target_actions, noise = self.agent.get_actions(
-            states[:, 1:],
-            goals[:, 1:],
+            states,
+            goals,
             target=True,
         )
-        self._train_data_buffer[:, :-1]["critic_targets"] = \
-            rewards + self.discount_factor * self.agent.get_return_estimates(
-                states[:, 1:],
+        self._log_data_buffer["target_return_estimates"] = self.agent.get_return_estimates(
+                states,
                 noisy_target_actions,
-                goals[:, 1:],
+                goals,
                 target=True,
-            )[..., 0]
+        )[..., 0]
+        self._train_data_buffer[:, :-1]["critic_targets"] = \
+            self._log_data_buffer[:, :-1]["rewards"] + \
+            self.discount_factor * \
+            self._log_data_buffer[:, 1:]["target_return_estimates"]
         # HINDSIGHT EXPERIENCE
         her_goals_per_sim = [
             np.unique(trajectory_goals, axis=0)
@@ -405,6 +424,10 @@ class Procedure(object):
         self.accumulate_log_data(
             goals=self._train_data_buffer["goals"],
             current_goals=self._log_data_buffer["current_goals"],
+            predicted_next_states=self._log_data_buffer[:, :-1]["predicted_next_states"],
+            forward_targets=self._train_data_buffer[:, :-1]["forward_targets"],
+            return_estimates=self._log_data_buffer[:, 1:-1]["target_return_estimates"],
+            critic_targets=self._train_data_buffer[:, 1:-1]["critic_targets"],
             time=time_stop - time_start,
             exploration=True,
         )
@@ -430,7 +453,7 @@ class Procedure(object):
         predicted_next_states = self.agent.get_predictions(
             states, pure_actions)
         return_estimates = self.agent.get_return_estimates(
-            states, pure_actions, goals)
+            states, pure_actions, goals)[..., 0]
         self._evaluation_data_buffer["predicted_next_states"] = \
             predicted_next_states
         self._evaluation_data_buffer["return_estimates"] = \
@@ -455,11 +478,17 @@ class Procedure(object):
         self.accumulate_log_data(
             goals=self._evaluation_data_buffer["goals"],
             current_goals=self._evaluation_data_buffer["current_goals"],
+            predicted_next_states=self._evaluation_data_buffer[:, :-1]["predicted_next_states"],
+            forward_targets=self._evaluation_data_buffer[:, :-1]["forward_targets"],
+            return_estimates=self._evaluation_data_buffer[:, :-1]["return_estimates"],
+            critic_targets=self._evaluation_data_buffer[:, :-1]["critic_targets"],
             time=time_stop - time_start,
             exploration=False,
         )
 
-    def accumulate_log_data(self, goals, current_goals, time, exploration):
+    def accumulate_log_data(self, goals, current_goals, predicted_next_states,
+            forward_targets, return_estimates, critic_targets, time,
+            exploration):
         if exploration:
             tb = self.tb["collection"]["exploration"]
         else:
@@ -506,6 +535,16 @@ class Procedure(object):
         if n_one_away_success + n_one_away_fail:
             one_away_success_rate = 100 * n_one_away_success / n_one_away_ends
             tb["one_away_sucess_rate"](one_away_success_rate)
+        #
+        signal = forward_targets
+        noise = forward_targets - predicted_next_states
+        forward_snr = get_snr_db(signal, noise)
+        tb["forward_snr"](np.mean(forward_snr))
+        #
+        signal = critic_targets
+        noise = critic_targets - return_estimates
+        critic_snr = get_snr_db(signal, noise)
+        tb["critic_snr"](np.mean(critic_snr))
         #
 
     def get_data(self):

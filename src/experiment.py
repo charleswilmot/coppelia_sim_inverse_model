@@ -1,6 +1,7 @@
 import hydra
 from procedure import Procedure
 import os
+import tensorflow as tf
 
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -29,8 +30,9 @@ def experiment(cfg):
             record = (episode_batch + 1) % experiment_conf.record_episode_every == 0
             dump_buffers = episode_batch in experiment_conf.dump_buffers_at
             print_info = (episode_batch + 1) % 10 == 0
-            print("batch {: 5d}\tpolicy:{}\tcritic:{}\tforward:{}\tsave:{}\trecord:{}\tdump buffers:{}".format(
+            print("batch {: 5d}\tevaluation:{}\tpolicy:{}\tcritic:{}\tforward:{}\tsave:{}\trecord:{}\tdump buffers:{}".format(
                 episode_batch + 1,
+                evaluation,
                 policy,
                 critic,
                 forward,
@@ -51,12 +53,13 @@ def experiment(cfg):
             if dump_buffers:
                 procedure.dump_buffers()
             if print_info:
-                print('n_policy_transition_gathered...', procedure.n_policy_transition_gathered)
-                print('n_policy_training..............', procedure.n_policy_training)
-                print('current_policy_ratio...........', procedure.current_policy_ratio)
-                print('n_critic_transition_gathered...', procedure.n_critic_transition_gathered)
-                print('n_critic_training..............', procedure.n_critic_training)
-                print('current_critic_ratio...........', procedure.current_critic_ratio)
+                print('n_exploration_episodes  ...  ', procedure.n_exploration_episodes)
+                print('n_evaluation_episodes  ....  ', procedure.n_evaluation_episodes)
+                print('n_transition_gathered  ....  ', procedure.n_transition_gathered)
+                print('n_policy_training  ........  ', procedure.n_policy_training)
+                print('n_critic_training  ........  ', procedure.n_critic_training)
+                print('n_forward_training  .......  ', procedure.n_forward_training)
+                print('n_global_training  ........  ', procedure.n_global_training)
         if not save:
             procedure.save()
         if experiment_conf.final_recording:
