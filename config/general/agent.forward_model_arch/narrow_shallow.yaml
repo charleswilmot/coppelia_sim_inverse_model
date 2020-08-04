@@ -1,5 +1,5 @@
 agent:
-  policy_model_arch:
+  forward_model_arch:
     backend: tensorflow
     class_name: Sequential
     config:
