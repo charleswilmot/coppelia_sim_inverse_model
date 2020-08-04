@@ -24,7 +24,7 @@ class Buffer(object):
         n = data.shape[0]
         indices = self.get_insertion_indices(n)
         if self.current_last < self.size:
-            self.current_last = self.current_last + n
+            self.current_last += n
         if self.current_last > self.size:
             self.current_last = self.size
         self.buffer[indices] = data

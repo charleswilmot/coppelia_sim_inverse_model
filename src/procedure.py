@@ -6,7 +6,7 @@ from tensorflow.keras.metrics import Mean
 import tensorflow as tf
 import time
 import os
-from visualization import Visualization
+from visualization import Visualization, visualization_data_type
 from collections import OrderedDict
 from tensorboard.plugins.hparams import api as hp
 from imageio import get_writer
@@ -15,8 +15,16 @@ from imageio import get_writer
 def get_snr_db(signal, noise, axis=1):
     mean_signal = np.mean(signal, axis=axis, keepdims=True)
     mean_noise = np.mean(noise, axis=axis, keepdims=True)
-    rms_signal_db = np.log10(np.std(signal - mean_signal, axis=axis))
-    rms_noise_db = np.log10(np.std(noise - mean_noise, axis=axis))
+    std_signal = np.std(signal - mean_signal, axis=axis)
+    std_noise = np.std(noise - mean_noise, axis=axis)
+    where = std_signal != 0
+    if not where.any():
+        print("WARNING: signal to noise can't be computed (constant signal), returning NaN")
+        return np.nan
+    std_signal = std_signal[where]
+    std_noise = std_noise[where]
+    rms_signal_db = np.log10(std_signal)
+    rms_noise_db = np.log10(std_noise)
     return 20 * (rms_signal_db - rms_noise_db)
 
 
@@ -126,10 +134,16 @@ class Procedure(object):
             ("forward_targets", np.float32, self.state_size),
             ("rewards", np.float32),
             ("critic_targets", np.float32),
+            ("max_step_returns", np.float32),
         ])
         self._evaluation_data_buffer = np.zeros(
             shape=(self.n_simulations, self.episode_length),
             dtype=self._evaluation_data_type
+        )
+        # visualization
+        self._visualization_data_buffer = np.zeros(
+            shape=(self.n_simulations, self.episode_length),
+            dtype=visualization_data_type
         )
 
         # COUNTERS
@@ -194,6 +208,7 @@ class Procedure(object):
             hp.hparams(self._hparams)
         # TREE STRUCTURE
         os.makedirs('./replays', exist_ok=True)
+        os.makedirs('./visualization_data', exist_ok=True)
 
     def dump_buffers(self):
         os.makedirs('./buffers', exist_ok=True)
@@ -259,7 +274,7 @@ class Procedure(object):
 
     def save(self):
         """Saves the model in the appropriate directory"""
-        path = "./checkpoints/{:08d}".format(self.n_policy_episodes)
+        path = "./checkpoints/{:08d}".format(self.n_global_training)
         self.agent.save_weights(path)
 
     def restore(self, path):
@@ -379,41 +394,42 @@ class Procedure(object):
             self.discount_factor * \
             self._log_data_buffer[:, 1:]["target_return_estimates"]
         # HINDSIGHT EXPERIENCE
-        her_goals_per_sim = [
-            np.unique(trajectory_goals, axis=0)
-            for trajectory_goals in current_goals
-        ]
-        her_goals_per_sim = [
-            her_goals[(her_goals != true_goal).any(axis=-1)]
-            for her_goals, true_goal in zip(her_goals_per_sim, goals[:, 0])
-        ]
-        her_goals_per_sim = [
-            her_goals[-self.her_max_replays:]
-            for her_goals in her_goals_per_sim
-        ]
         for_hindsight = []
-        for simulation, her_goals in enumerate(her_goals_per_sim):
-            for her_goal in her_goals:
-                her_data = np.copy(self._train_data_buffer[simulation])
-                her_data["goals"] = her_goal
-                goals = her_data["goals"]
-                current_goals = self._log_data_buffer[simulation]["current_goals"]
-                states = her_data["states"]
-                distances = np.sum(np.abs(goals - current_goals), axis=-1)
-                rewards = distances[:-1] - distances[1:]
-                pure_target_actions, noisy_target_actions, noise = self.agent.get_actions(
-                    states[1:],
-                    goals[1:],
-                    target=True,
-                )
-                her_data[:-1]["critic_targets"] = \
-                    rewards + self.discount_factor * self.agent.get_return_estimates(
+        if self.her_max_replays > 0:
+            her_goals_per_sim = [
+                np.unique(trajectory_goals, axis=0)
+                for trajectory_goals in current_goals
+            ]
+            her_goals_per_sim = [
+                her_goals[(her_goals != true_goal).any(axis=-1)]
+                for her_goals, true_goal in zip(her_goals_per_sim, goals[:, 0])
+            ]
+            her_goals_per_sim = [
+                her_goals[-self.her_max_replays:]
+                for her_goals in her_goals_per_sim
+            ]
+            for simulation, her_goals in enumerate(her_goals_per_sim):
+                for her_goal in her_goals:
+                    her_data = np.copy(self._train_data_buffer[simulation])
+                    her_data["goals"] = her_goal
+                    goals = her_data["goals"]
+                    current_goals = self._log_data_buffer[simulation]["current_goals"]
+                    states = her_data["states"]
+                    distances = np.sum(np.abs(goals - current_goals), axis=-1)
+                    rewards = distances[:-1] - distances[1:]
+                    pure_target_actions, noisy_target_actions, noise = self.agent.get_actions(
                         states[1:],
-                        noisy_target_actions,
                         goals[1:],
                         target=True,
-                    )[..., 0]
-                for_hindsight.append(her_data[:-1])
+                    )
+                    her_data[:-1]["critic_targets"] = \
+                        rewards + self.discount_factor * self.agent.get_return_estimates(
+                            states[1:],
+                            noisy_target_actions,
+                            goals[1:],
+                            target=True,
+                        )[..., 0]
+                    for_hindsight.append(her_data[:-1])
         regular_data = self._train_data_buffer[:, :-1].flatten()
         buffer_data = np.concatenate(for_hindsight + [regular_data], axis=0)
         self.buffer.integrate(buffer_data)
@@ -465,13 +481,16 @@ class Procedure(object):
         # critic target (valid until :-1)
         distances = np.sum(np.abs(goals - current_goals), axis=-1)
         self._evaluation_data_buffer[:, :-1]["rewards"] = distances[:, :-1] - distances[:, 1:]
-        rewards = self._evaluation_data_buffer[:, :-1]["rewards"]
-        n_steps_return_estimates = return_estimates[:, -1]
-        for iteration in np.arange(self.episode_length - 2, -1, -1):
-            n_steps_return_estimates = rewards[:, iteration] + \
-                self.discount_factor * n_steps_return_estimates
-            self._evaluation_data_buffer[:, iteration]["critic_targets"] = \
-                n_steps_return_estimates
+        self._evaluation_data_buffer[:, :-1]["critic_targets"] = \
+            self._evaluation_data_buffer[:, :-1]["rewards"] + \
+            self.discount_factor * \
+            self._evaluation_data_buffer[:, 1:]["return_estimates"]
+        prev = self._evaluation_data_buffer[:, -1]["return_estimates"]
+        self._evaluation_data_buffer[:, -1]["max_step_returns"] = prev
+        for it in np.arange(self.episode_length - 2, -1, -1):
+            self._evaluation_data_buffer[:, it]["max_step_returns"] = \
+                self.discount_factor * prev + self._evaluation_data_buffer[:, it]["rewards"]
+            prev = self._evaluation_data_buffer[:, it]["max_step_returns"]
         self.n_evaluation_episodes += self.n_simulations
         time_stop = time.time()
         # LOG METRICS
@@ -481,10 +500,17 @@ class Procedure(object):
             predicted_next_states=self._evaluation_data_buffer[:, :-1]["predicted_next_states"],
             forward_targets=self._evaluation_data_buffer[:, :-1]["forward_targets"],
             return_estimates=self._evaluation_data_buffer[:, :-1]["return_estimates"],
-            critic_targets=self._evaluation_data_buffer[:, :-1]["critic_targets"],
+            critic_targets=self._evaluation_data_buffer[:, :-1]["max_step_returns"],
             time=time_stop - time_start,
             exploration=False,
         )
+        # LOG DATA FOR CUSTOM VISUALIZATION
+        self._visualization_data_buffer["rewards"] = self._evaluation_data_buffer["rewards"]
+        self._visualization_data_buffer["return_estimates"] = self._evaluation_data_buffer["return_estimates"]
+        self._visualization_data_buffer["critic_targets"] = self._evaluation_data_buffer["critic_targets"]
+        self._visualization_data_buffer["max_step_returns"] = self._evaluation_data_buffer["max_step_returns"]
+        with open("./visualization_data/{}_critic.dat".format(self.episode_length), 'ab') as f:
+            f.write(self._visualization_data_buffer.tobytes())
 
     def accumulate_log_data(self, goals, current_goals, predicted_next_states,
             forward_targets, return_estimates, critic_targets, time,
