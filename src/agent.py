@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
+from custom_layers import custom_objects
 
 
 def model_copy(model, fake_inp):
@@ -42,7 +43,9 @@ class Agent(object):
         #   POLICY
         self.policy_learning_rate = policy_learning_rate
         self.policy_model = keras.models.model_from_yaml(
-            policy_model_arch.pretty(resolve=True))
+            policy_model_arch.pretty(resolve=True),
+            custom_objects=custom_objects
+        )
         fake_inp = np.zeros(
             shape=(1, state_size + goal_size),
             dtype=np.float32
@@ -52,7 +55,9 @@ class Agent(object):
         #   CRITIC
         self.critic_learning_rate = critic_learning_rate
         self.critic_model_0 = keras.models.model_from_yaml(
-            critic_model_arch.pretty(resolve=True))
+            critic_model_arch.pretty(resolve=True),
+            custom_objects=custom_objects
+        )
         self.critic_model_1 = keras.models.clone_model(self.critic_model_0)
         fake_inp = np.zeros(
             shape=(1, state_size + goal_size + action_size),
@@ -64,7 +69,9 @@ class Agent(object):
         #   FORWARD
         self.forward_learning_rate = forward_learning_rate
         self.forward_model = keras.models.model_from_yaml(
-            forward_model_arch.pretty(resolve=True))
+            forward_model_arch.pretty(resolve=True),
+            custom_objects=custom_objects
+        )
         self.forward_optimizer = keras.optimizers.Adam(self.forward_learning_rate)
         #   EXPLORATION NOISE
         self.exploration_params = exploration
