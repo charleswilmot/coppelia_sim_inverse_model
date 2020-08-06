@@ -8,7 +8,7 @@ agent:
   target_smoothing_stddev: 0.01
   tau: 0.001
   exploration:
-    stddev: 0.2
+    stddev: 0.4
     n: 50
 
   policy_model_arch:
@@ -230,10 +230,10 @@ simulation:
 
 
 procedure:
-  episode_length: 100
-  batch_size: 64
+  episode_length: 25
+  batch_size: 256
   discount_factor: 0.7
-  updates_per_sample: 40
+  updates_per_sample: 16
   simulation_timestep: 0.2
   visualize: False # delete me todo
   movement_mode: minimalist
@@ -244,7 +244,7 @@ procedure:
     max_replays: 0
 
 experiment:
-  n_episodes: 8000
+  n_episodes: 30000
   policy_every: 2
   critic_every: 1
   forward_every: 1
