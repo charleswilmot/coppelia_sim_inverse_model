@@ -392,17 +392,13 @@ class SimulationConsumer(SimulationConsumerAbstract):
         self.step_sim()
         return self.get_data()
 
-    @communicate_return_value
-    def apply_movement(self, actions, mode='minimalist', span=10):
+    def get_movement_velocities(self, actions, mode='minimalist', span=10):
         if mode == 'minimalist':
             ramp = 0.5 - 0.5 * np.cos(np.linspace(0, 2 * np.pi, span))
             velocities = \
                 actions[np.newaxis] * \
                 ramp[:, np.newaxis] * \
                 self._upper_velocity_limits[np.newaxis]
-            for velocity in velocities:
-                self.set_joint_target_velocities(velocity)
-                self.step_sim()
         elif mode == "cubic_hermite":
             x = [0, 0.5, 1]
             actions_speeds = actions[:2 * self._n_joints]
@@ -420,12 +416,28 @@ class SimulationConsumer(SimulationConsumerAbstract):
             velocities = poly(eval) * self._upper_velocity_limits[np.newaxis]
             self._previous_hermite_speeds = speeds[-1]
             self._previous_hermite_accelerations = accelerations[-1]
-            for velocity in velocities:
-                self.set_joint_target_velocities(velocity)
-                self.step_sim()
         else:
             raise ValueError("Unrecognized movement mode ({})".format(mode))
+        return velocities
+
+    @communicate_return_value
+    def apply_movement(self, actions, mode='minimalist', span=10):
+        velocities = self.get_movement_velocities(actions, mode=mode, span=span)
+        for velocity in velocities:
+            self.set_joint_target_velocities(velocity)
+            self.step_sim()
         return self.get_data()
+
+    @communicate_return_value
+    def apply_movement_get_frames(self, actions, cam_id, mode='minimalist', span=10):
+        velocities = self.get_movement_velocities(actions, mode=mode, span=span)
+        frames = [self.get_frame(cam_id)]
+        for velocity in velocities:
+            self.set_joint_target_velocities(velocity)
+            self.step_sim()
+            frames.append(self.get_frame(cam_id))
+        states, registers = self.get_data()
+        return states, registers, frames
 
     def set_control_loop_enabled(self, bool):
         for arm in self._arm_list:

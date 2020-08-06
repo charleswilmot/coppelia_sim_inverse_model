@@ -309,25 +309,31 @@ class Procedure(object):
                     resolution=resolution
                 )[0]
             for i in range(n_episodes):
+                print("episode", i)
                 goals = self.sample_goals(1)
-                states, current_goals = self.reset_simulations()
-                for iteration in range(self.episode_length):
+                register_states = self.sample_goals(1)
+                states, current_goals = self.reset_simulations(register_states, goals)
+                if record:
                     frame = self.simulation_pool.get_frame(cam_id)[0]
                     frame = (frame * 255).astype(np.uint8)
-                    if record:
+                    for i in range(24):
                         writer.append_data(frame)
-                        if iteration == 0:
-                            for i in range(24):
-                                writer.append_data(frame)
+                for iteration in range(self.episode_length):
                     if exploration:
-                        _, noisy_actions, _ = self.agent.get_actions(
+                        _, actions, _ = self.agent.get_actions(
                             states, goals, exploration=True)
-                        states, current_goals = self.apply_action(noisy_actions)
                     else:
-                        pure_actions = self.agent.get_actions(
+                        actions = self.agent.get_actions(
                             states, goals, exploration=False)
-                        states, current_goals = self.apply_action(pure_actions)
-                    # print("success?", (current_goals == goals).all())
+                    if record:
+                        states, current_goals, frames = \
+                            self.apply_action_get_frames(actions, cam_id)
+                        for frame in frames:
+                            frame = (frame * 255).astype(np.uint8)
+                            writer.append_data(frame)
+                    else:
+                        states, current_goals = \
+                            self.apply_action(actions)
             if record:
                 writer.close()
                 self.simulation_pool.delete_camera(cam_id)
@@ -587,6 +593,17 @@ class Procedure(object):
                     span=self.movement_spans
                 )))
         return np.vstack(states), np.vstack(current_goals)
+
+    def apply_action_get_frames(self, actions, cam_id):
+        with self.simulation_pool.distribute_args():
+            states, current_goals, frames = \
+                tuple(zip(*self.simulation_pool.apply_movement_get_frames(
+                    actions,
+                    [cam_id for i in range(len(self.movement_spans))],
+                    mode=self.movement_modes,
+                    span=self.movement_spans
+                )))
+        return np.vstack(states), np.vstack(current_goals), np.vstack(frames)
 
     def train(self, policy=True, critic=True, forward=True):
         data = self.buffer.sample(self.batch_size)
