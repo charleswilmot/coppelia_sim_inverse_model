@@ -300,7 +300,7 @@ class Procedure(object):
             if record:
                 writer = get_writer(video_name)
                 cam_id = self.simulation_pool.add_camera(
-                    position=(1, 1, 1),
+                    position=(1.15, 1.35, 1),
                     orientation=(
                         24 * np.pi / 36,
                         -7 * np.pi / 36,
