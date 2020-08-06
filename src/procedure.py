@@ -287,11 +287,10 @@ class Procedure(object):
         actuators in the simulation for each simulation"""
         return np.random.randint(2, size=(n, self.goal_size))
 
-    def reset_simulations(self):
-        goals = self.sample_goals()
+    def reset_simulations(self, register_states, register_goals):
         with self.simulation_pool.distribute_args():
             states, current_goals = \
-                tuple(zip(*self.simulation_pool.reset(goals)))
+                tuple(zip(*self.simulation_pool.reset(register_states, register_goals)))
         return np.vstack(states), np.vstack(current_goals)
 
     def replay(self, exploration=False, record=False, n_episodes=10,
@@ -336,7 +335,8 @@ class Procedure(object):
     def collect_data(self):
         """Performs one episode of exploration, places data in the buffer"""
         goals = self.sample_goals()
-        states, current_goals = self.reset_simulations()
+        register_states = self.sample_goals()
+        states, current_goals = self.reset_simulations(register_states, goals)
         time_start = time.time()
         sims = np.arange(self.n_simulations)
         for iteration in range(self.episode_length):
@@ -451,7 +451,8 @@ class Procedure(object):
     def evaluate(self):
         """Performs one episode of evaluation"""
         goals = self.sample_goals()
-        states, current_goals = self.reset_simulations()
+        register_states = self.sample_goals()
+        states, current_goals = self.reset_simulations(register_states, goals)
         time_start = time.time()
         for iteration in range(self.episode_length):
             pure_actions = self.agent.get_actions(

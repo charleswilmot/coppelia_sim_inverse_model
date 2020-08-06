@@ -193,10 +193,13 @@ class SimulationConsumer(SimulationConsumerAbstract):
         ]
 
     @communicate_return_value
-    def reset(self, register_states):
+    def reset(self, register_states, register_goals):
+        self._previous_hermite_speeds[:] = 0
+        self._previous_hermite_accelerations[:] = 0
         for tree in self._reset_configuration_trees:
             self._pyrep.set_configuration_tree(tree)
         self.set_stateful_objects_states(register_states)
+        self.set_stateful_objects_goals(register_goals)
         actions = np.random.uniform(size=self._n_joints, low=-1, high=1)
         velocities = actions * self._upper_velocity_limits
         self.set_joint_target_velocities(velocities)
@@ -219,6 +222,15 @@ class SimulationConsumer(SimulationConsumerAbstract):
             )
         for shape, state in zip(self._stateful_shape_list, states):
             shape.set_state(state)
+
+    def set_stateful_objects_goals(self, goals):
+        if len(goals) != len(self._stateful_shape_list):
+            raise ValueError(
+            "Can not set the object goals, wrong length ({} for {})".format(
+                len(goals), len(self._stateful_shape_list))
+            )
+        for shape, goal in zip(self._stateful_shape_list, goals):
+            shape.set_goal(goal)
 
     def _add_stateful_object(self, model):
         self._stateful_shape_list.append(model)
@@ -874,4 +886,29 @@ if __name__ == '__main__':
         simulation.stop_sim()
         simulation.close()
 
-    test_8()
+    def open_one_environment():
+        pool_size = 1
+        simulation = SimulationProducer(
+            scene=MODEL_PATH + '/custom_timestep.ttt',
+            gui=True
+        )
+        simulation.create_environment('one_arm_2_buttons_1_levers_1_tap')
+        dt = 0.2
+        simulation.set_simulation_timestep(dt)
+        simulation.set_control_loop_enabled(False)
+        simulation.start_sim()
+        simulation.add_camera(
+            position=(1.15, 1.35, 1),
+            orientation=(
+                24 * np.pi / 36,
+                -7 * np.pi / 36,
+                 4 * np.pi / 36
+            ),
+            resolution=[320, 240]
+        )
+        while True:
+            simulation.step_sim()
+        simulation.stop_sim()
+        simulation.close()
+
+    open_one_environment()

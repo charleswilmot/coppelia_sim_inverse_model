@@ -30,6 +30,19 @@ class StatefulObject(Dummy):
             )
         return ints[0]
 
+    def set_goal(self, on):
+        funcname = "setGoal@{}".format(self.get_name())
+        ints, floats, strings, bytes = self._pyrep.script_call(
+            funcname,
+            1,
+            ints=[int(on)]
+        )
+        if not ints:
+            raise ValueError(
+                "Script return value incorect ({})".format(self.get_name())
+            )
+        return ints[0]
+
 
 class TapShape(StatefulObject):
     def __init__(self, name_or_handle, pyrep):
