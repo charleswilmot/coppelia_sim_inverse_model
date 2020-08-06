@@ -86,7 +86,7 @@ def next_reservation():
     reservation = ""
     if free_cpus["jetski"] >= 10 and free_gpus["jetski"] > 0:
         reservation = "--reservation triesch-shared"
-    if reservations["triesch-shared"] * 2 < reservations["(null)"]:
+    if reservations["triesch-shared"] * 200 < reservations["(null)"]:
         reservation = "--reservation triesch-shared"
     else:
         reservation = ""
