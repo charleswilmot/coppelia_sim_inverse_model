@@ -423,21 +423,32 @@ class SimulationConsumer(SimulationConsumerAbstract):
     @communicate_return_value
     def apply_movement(self, actions, mode='minimalist', span=10):
         velocities = self.get_movement_velocities(actions, mode=mode, span=span)
+        for_std = np.array([91, 94, 43, 67, 12, 8.7, 2.3])
+        per_joint_metabolic_cost = np.zeros(self._n_joints, dtype=np.float32)
         for velocity in velocities:
             self.set_joint_target_velocities(velocity)
             self.step_sim()
-        return self.get_data()
+            per_joint_metabolic_cost += self.get_joint_forces()
+        per_joint_metabolic_cost /= for_std * len(velocities)
+        metabolic_cost = np.mean(per_joint_metabolic_cost)
+        state, stateful_objects_states = self.get_data()
+        return state, stateful_objects_states, metabolic_cost
 
     @communicate_return_value
     def apply_movement_get_frames(self, actions, cam_id, mode='minimalist', span=10):
         velocities = self.get_movement_velocities(actions, mode=mode, span=span)
         frames = [self.get_frame(cam_id)]
+        for_std = np.array([91, 94, 43, 67, 12, 8.7, 2.3])
+        per_joint_metabolic_cost = np.zeros(self._n_joints, dtype=np.float32)
         for velocity in velocities:
             self.set_joint_target_velocities(velocity)
             self.step_sim()
             frames.append(self.get_frame(cam_id))
-        states, registers = self.get_data()
-        return states, registers, frames
+            per_joint_metabolic_cost += self.get_joint_forces()
+        per_joint_metabolic_cost /= for_std * len(velocities)
+        metabolic_cost = np.mean(per_joint_metabolic_cost)
+        state, stateful_objects_states = self.get_data()
+        return state, stateful_objects_states, metabolic_cost, frames
 
     def set_control_loop_enabled(self, bool):
         for arm in self._arm_list:
@@ -898,6 +909,40 @@ if __name__ == '__main__':
         simulation.stop_sim()
         simulation.close()
 
+    def test_9():
+        simulation = SimulationProducer(
+            scene=MODEL_PATH + '/custom_timestep.ttt',
+            guis=True
+        )
+        simulation.create_environment('one_arm_2_buttons_1_levers_1_tap')
+        dt = 0.2
+        simulation.set_simulation_timestep(dt)
+        simulation.set_control_loop_enabled(False)
+        simulation.start_sim()
+        n_joints = simulation.get_n_joints()[0]
+
+        N = 720
+        actions = np.random.uniform(low=-1, high=1, size=(N, n_joints))
+
+        t0 = time.time()
+
+        metabolic_costs = []
+        for i, action in enumerate(actions):
+            _, _, metabolic_cost = simulation.apply_movement(action, span=10, mode="minimalist")
+            print(i, metabolic_cost)
+            metabolic_costs.append(metabolic_cost)
+
+        t1 = time.time()
+
+        print('mean', np.mean(metabolic_costs), 'std', np.std(metabolic_costs))
+        print("{} iteration in {:.3f} sec ({:.3f} it/sec)".format(
+            N * pool_size,
+            t1 - t0,
+            N * pool_size / (t1 - t0)
+        ))
+        simulation.stop_sim()
+        simulation.close()
+
     def open_one_environment():
         pool_size = 1
         simulation = SimulationProducer(
@@ -923,4 +968,5 @@ if __name__ == '__main__':
         simulation.stop_sim()
         simulation.close()
 
-    open_one_environment()
+    # open_one_environment()
+    test_9()

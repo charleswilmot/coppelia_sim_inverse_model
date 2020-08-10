@@ -47,6 +47,7 @@ class Procedure(object):
         ]
         self.her_max_replays = procedure_conf.her.max_replays
         self.discount_factor = procedure_conf.discount_factor
+        self.metabolic_cost_scale = procedure_conf.metabolic_cost_scale
         #    HPARAMS
         self._hparams = OrderedDict([
             ("policy_LR", agent_conf.policy_learning_rate),
@@ -109,6 +110,7 @@ class Procedure(object):
             ("next_pure_actions", np.float32, self.action_size),
             ("predicted_next_states", np.float32, self.state_size),
             ("rewards", np.float32),
+            ("metabolic_costs", np.float32),
             ("target_return_estimates", np.float32),
         ])
         self._log_data_buffer = np.zeros(
@@ -125,6 +127,7 @@ class Procedure(object):
             ("return_estimates", np.float32),
             ("forward_targets", np.float32, self.state_size),
             ("rewards", np.float32),
+            ("metabolic_costs", np.float32),
             ("critic_targets", np.float32),
             ("max_step_returns", np.float32),
         ])
@@ -321,13 +324,13 @@ class Procedure(object):
                         actions = self.agent.get_actions(
                             states, goals, exploration=False)
                     if record:
-                        states, current_goals, frames = \
+                        states, current_goals, metabolic_costs, frames = \
                             self.apply_action_get_frames(actions, cam_id)
                         for frame in frames:
                             frame = (frame * 255).astype(np.uint8)
                             writer.append_data(frame)
                     else:
-                        states, current_goals = \
+                        states, current_goals, metabolic_costs = \
                             self.apply_action(actions)
             if record:
                 writer.close()
@@ -369,7 +372,8 @@ class Procedure(object):
             self._log_data_buffer[:, iteration]["pure_actions"] = pure_actions
             self._log_data_buffer[:, iteration]["next_pure_actions"] = best_next_pure_actions
             self._log_data_buffer[:, iteration]["predicted_next_states"] = best_predicted_next_states
-            states, current_goals = self.apply_action(best_noisy_actions)
+            states, current_goals, metabolic_costs = self.apply_action(best_noisy_actions)
+            self._log_data_buffer[:, iteration]["metabolic_costs"] = metabolic_costs
         goals = self._train_data_buffer["goals"]
         current_goals = self._log_data_buffer["current_goals"]
         # COMPUTE TARGETS
@@ -378,7 +382,9 @@ class Procedure(object):
         self._train_data_buffer[:, :-1]["forward_targets"] = states[:, 1:]
         # critic target (valid until :-1)
         distances = np.sum(np.abs(goals - current_goals), axis=-1)
-        self._log_data_buffer[:, :-1]["rewards"] = distances[:, :-1] - distances[:, 1:]
+        self._log_data_buffer[:, :-1]["rewards"] = \
+            distances[:, :-1] - distances[:, 1:] - \
+            self.metabolic_cost_scale * self._log_data_buffer[:, :-1]["metabolic_costs"]
         pure_target_actions, noisy_target_actions, noise = self.agent.get_actions(
             states,
             goals,
@@ -464,7 +470,8 @@ class Procedure(object):
             self._evaluation_data_buffer[:, iteration]["goals"] = goals
             self._evaluation_data_buffer[:, iteration]["current_goals"] = current_goals
             self._evaluation_data_buffer[:, iteration]["pure_actions"] = pure_actions
-            states, current_goals = self.apply_action(pure_actions)
+            states, current_goals, metabolic_costs = self.apply_action(pure_actions)
+            self._evaluation_data_buffer[:, iteration]["metabolic_costs"] = metabolic_costs
         states = self._evaluation_data_buffer["states"]
         pure_actions = self._evaluation_data_buffer["pure_actions"]
         goals = self._evaluation_data_buffer["goals"]
@@ -485,6 +492,8 @@ class Procedure(object):
         # critic target (valid until :-1)
         distances = np.sum(np.abs(goals - current_goals), axis=-1)
         self._evaluation_data_buffer[:, :-1]["rewards"] = distances[:, :-1] - distances[:, 1:]
+            distances[:, :-1] - distances[:, 1:] - \
+            self.metabolic_cost_scale * self._evaluation_data_buffer[:, :-1]["metabolic_costs"]
         self._evaluation_data_buffer[:, :-1]["critic_targets"] = \
             self._evaluation_data_buffer[:, :-1]["rewards"] + \
             self.discount_factor * \
@@ -585,24 +594,24 @@ class Procedure(object):
 
     def apply_action(self, actions):
         with self.simulation_pool.distribute_args():
-            states, current_goals = \
+            states, current_goals, metabolic_costs = \
                 tuple(zip(*self.simulation_pool.apply_movement(
                     actions,
                     mode=self.movement_modes,
                     span=self.movement_spans
                 )))
-        return np.vstack(states), np.vstack(current_goals)
+        return np.vstack(states), np.vstack(current_goals), np.vstack(metabolic_costs)
 
     def apply_action_get_frames(self, actions, cam_id):
         with self.simulation_pool.distribute_args():
-            states, current_goals, frames = \
+            states, current_goals, metabolic_costs, frames = \
                 tuple(zip(*self.simulation_pool.apply_movement_get_frames(
                     actions,
                     [cam_id for i in range(len(self.movement_spans))],
                     mode=self.movement_modes,
                     span=self.movement_spans
                 )))
-        return np.vstack(states), np.vstack(current_goals), np.vstack(frames)
+        return np.vstack(states), np.vstack(current_goals), np.vstack(metabolic_costs), np.vstack(frames)
 
     def train(self, policy=True, critic=True, forward=True):
         data = self.buffer.sample(self.batch_size)

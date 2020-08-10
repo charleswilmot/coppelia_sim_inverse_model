@@ -243,6 +243,7 @@ procedure:
   log_freq: 1
   her:
     max_replays: 0
+  metabolic_cost_scale: 0.1
 
 experiment:
   n_episodes: 30000
