@@ -202,6 +202,8 @@ class Procedure(object):
             "collection/exploration_critic_snr_db", dtype=tf.float32)
         self.tb["collection"]["evaluation"]["critic_snr"] = Mean(
             "collection/evaluation_critic_snr_db", dtype=tf.float32)
+        self.tb["collection"]["exploration"]["current_stddev"] = Mean(
+            "collection/exploration_current_stddev", dtype=tf.float32)
         #
         self.summary_writer = tf.summary.create_file_writer("logs")
         with self.summary_writer.as_default():
@@ -309,7 +311,7 @@ class Procedure(object):
                     resolution=resolution
                 )[0]
             for i in range(n_episodes):
-                print("episode", i)
+                print("replay: episode", i)
                 goals = self.sample_goals(1)
                 register_states = self.sample_goals(1)
                 states, current_goals = self.reset_simulations(register_states, goals)
@@ -321,7 +323,8 @@ class Procedure(object):
                 for iteration in range(self.episode_length):
                     if exploration:
                         _, actions, _ = self.agent.get_actions(
-                            states, goals, exploration=True)
+                            states, goals,
+                            exploration=True, n_simulation_respected=False)
                     else:
                         actions = self.agent.get_actions(
                             states, goals, exploration=False)
@@ -399,6 +402,7 @@ class Procedure(object):
             self._log_data_buffer[:, :-1]["rewards"] + \
             self.discount_factor * \
             self._log_data_buffer[:, 1:]["target_return_estimates"]
+        self.agent.register_total_reward(np.sum(self._log_data_buffer["rewards"], axis=-1))
         # HINDSIGHT EXPERIENCE
         for_hindsight = []
         if self.her_max_replays > 0:
@@ -452,6 +456,7 @@ class Procedure(object):
             critic_targets=self._train_data_buffer[:, 1:-1]["critic_targets"],
             time=time_stop - time_start,
             exploration=True,
+            current_stddev=self.agent.exploration_stddev.numpy()
         )
 
     def evaluate(self):
@@ -521,7 +526,7 @@ class Procedure(object):
 
     def accumulate_log_data(self, goals, current_goals, predicted_next_states,
             forward_targets, return_estimates, critic_targets, time,
-            exploration):
+            exploration, current_stddev=None):
         if exploration:
             tb = self.tb["collection"]["exploration"]
         else:
@@ -579,6 +584,8 @@ class Procedure(object):
         critic_snr = get_snr_db(signal, noise)
         tb["critic_snr"](np.mean(critic_snr))
         #
+        if exploration:
+            tb["current_stddev"](current_stddev)
 
     def get_data(self):
         states, current_goals = tuple(zip(*self.simulation_pool.get_data()))

@@ -4,6 +4,10 @@ import numpy as np
 from custom_layers import custom_objects
 
 
+def divide_no_nan(a, b):
+    return np.divide(a, b, out=np.zeros_like(a), where=b!=0)
+
+
 def model_copy(model, fake_inp):
     clone = keras.models.clone_model(model)
     fake_out = model(fake_inp)
@@ -39,7 +43,7 @@ class Agent(object):
             critic_learning_rate, critic_model_arch,
             forward_learning_rate, forward_model_arch,
             exploration, target_smoothing_stddev, tau,
-            state_size, action_size, goal_size):
+            state_size, action_size, goal_size, n_simulations):
         #   POLICY
         self.policy_learning_rate = policy_learning_rate
         self.policy_model = keras.models.model_from_yaml(
@@ -75,8 +79,25 @@ class Agent(object):
         self.forward_optimizer = keras.optimizers.Adam(self.forward_learning_rate)
         #   EXPLORATION NOISE
         self.exploration_params = exploration
-        self.exploration_stddev = exploration.stddev
+        self.exploration_stddev = tf.Variable(exploration.stddev, dtype=tf.float32)
         self.exploration_n = exploration.n
+        self.success_rate = None
+        self.autotune_scale = exploration.autotune_scale
+        self.success_rate_estimator_speed = exploration.success_rate_estimator_speed
+        self.n_simulations = n_simulations
+        if self.n_simulations != 1:
+            self.stddev_coefs_step = self.autotune_scale ** -(2 / (self.n_simulations - 1))
+            self.histogram_step = self.stddev_coefs_step ** 2
+            self.stddev_coefs = self.stddev_coefs_step ** np.arange(
+                -(self.n_simulations - 1) / 2,
+                1 + (self.n_simulations - 1) / 2,
+                1
+            )
+            self.bins = self.histogram_step ** np.arange(
+                np.floor(np.log(0.0001) / np.log(self.histogram_step)),
+                np.ceil(np.log(2) / np.log(self.histogram_step))
+            )
+            self.mean_reward = np.zeros(len(self.bins) + 1)
         #   TD3
         self.target_smoothing_stddev = target_smoothing_stddev
         self.tau = tau
@@ -96,7 +117,8 @@ class Agent(object):
         self.target_critic_model_1.load_weights(path + "/target_critic_model_1")
 
     @tf.function
-    def get_actions(self, states, goals, exploration=False, target=False):
+    def get_actions(self, states, goals, exploration=False, target=False,
+            n_simulation_respected=True):
         states, goals = to_matching_shape(states, goals)
         inps = tf.concat([states, tf.cast(goals, tf.float32)], axis=-1)
         if target:
@@ -105,21 +127,11 @@ class Agent(object):
             pure_actions = self.target_policy_model(inps)
             shape = tf.shape(pure_actions)
             broadcast_actions = False
-        else:
-            stddev = self.exploration_stddev
-            pure_actions = self.policy_model(inps)
-            shape = tf.shape(pure_actions)
-            shape = tf.concat([shape[:1], [self.exploration_n], shape[1:]], axis=0)
-            broadcast_actions = True
-        if exploration:
             noises = tf.random.truncated_normal(
                 shape=shape,
                 stddev=stddev,
             )
-            if broadcast_actions:
-                pure_actions_reshaped = pure_actions[:, tf.newaxis]
-            else:
-                pure_actions_reshaped = pure_actions
+            pure_actions_reshaped = pure_actions
             noisy_actions = tf.clip_by_value(
                 pure_actions_reshaped + noises,
                 clip_value_min=-1,
@@ -128,7 +140,52 @@ class Agent(object):
             noises = noisy_actions - pure_actions_reshaped
             return pure_actions, noisy_actions, noises
         else:
-            return pure_actions
+            stddev = self.exploration_stddev
+            pure_actions = self.policy_model(inps)
+            shape = tf.shape(pure_actions)
+            shape = tf.concat([shape[:1], [self.exploration_n], shape[1:]], axis=0)
+            if exploration:
+                noises = tf.random.truncated_normal(
+                    shape=shape,
+                    stddev=stddev,
+                )
+                if n_simulation_respected:
+                    noises *= self.stddev_coefs[:, np.newaxis, np.newaxis]
+                pure_actions_reshaped = pure_actions[:, tf.newaxis]
+                noisy_actions = tf.clip_by_value(
+                    pure_actions_reshaped + noises,
+                    clip_value_min=-1,
+                    clip_value_max=1
+                )
+                noises = noisy_actions - pure_actions_reshaped
+                return pure_actions, noisy_actions, noises
+            else:
+                return pure_actions
+
+    def register_total_reward(self, rewards):
+        stddevs = self.stddev_coefs * self.exploration_stddev
+        current_bins = np.digitize(stddevs, self.bins)
+        c = self.success_rate_estimator_speed
+        print('current_bins', current_bins)
+        print('rewards', rewards)
+        for bin, reward in zip(current_bins, rewards):
+            self.mean_reward[bin] = (1 - c) * self.mean_reward[bin] + c * reward
+        filtered_mean_reward = np.convolve(
+            self.mean_reward,
+            self.n_simulations // 2,
+            mode='same'
+        )
+        index = np.argmax(filtered_mean_reward)
+        print('filtered_mean_reward', filtered_mean_reward)
+        print('index', index)
+        if index == 0:
+            best_std = self.bins[0]
+        elif index == len(self.bins):
+            best_std = self.bins[-1]
+        else:
+            best_std = 0.5 * (self.bins[index - 1] + self.bins[index])
+        self.exploration_stddev.assign(min(best_std, 1.0))
+        print("New exploration stddev at center:", self.exploration_stddev.numpy())
 
     @tf.function
     def get_predictions(self, states, actions):

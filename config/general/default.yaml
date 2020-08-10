@@ -5,11 +5,14 @@ agent:
   state_size: 25
   action_size: ${simulation.n_joints}
   goal_size: ${simulation.n_registers}
+  n_simulations: ${simulation.n}
   target_smoothing_stddev: 0.01
   tau: 0.001
   exploration:
     stddev: 0.4
     n: 50
+    autotune_scale: 0.5
+    success_rate_estimator_speed: 0.01
 
   policy_model_arch:
     backend: tensorflow
