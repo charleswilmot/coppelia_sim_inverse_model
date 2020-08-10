@@ -62,14 +62,6 @@ class Procedure(object):
             ("movement_mode", procedure_conf.movement_mode),
             ("movement_span", procedure_conf.movement_span_in_sec),
         ])
-        #   VISUALIZATION
-        if procedure_conf.visualize:
-            self._visualization = Visualization(
-                mini=0,
-                maxi=agent_conf.prediction_time_window + 10
-            )
-        else:
-            self._visualization = None
         #   OBJECTS
         self.agent = Agent(**agent_conf)
         self.buffer = Buffer(**buffer_conf)
