@@ -184,8 +184,8 @@ class Agent(object):
             best_std = self.bins[-1]
         else:
             best_std = 0.5 * (self.bins[index - 1] + self.bins[index])
-        self.exploration_stddev.assign(min(best_std, 1.0))
-        print("New exploration stddev at center:", self.exploration_stddev.numpy())
+        best_std = c * min(best_std, 1.0) + (1 - c) * self.exploration_stddev.numpy()
+        self.exploration_stddev.assign(best_std)
 
     @tf.function
     def get_predictions(self, states, actions):
