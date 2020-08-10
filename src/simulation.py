@@ -912,7 +912,7 @@ if __name__ == '__main__':
     def test_9():
         simulation = SimulationProducer(
             scene=MODEL_PATH + '/custom_timestep.ttt',
-            guis=True
+            gui=True
         )
         simulation.create_environment('one_arm_2_buttons_1_levers_1_tap')
         dt = 0.2
