@@ -428,7 +428,7 @@ class SimulationConsumer(SimulationConsumerAbstract):
         for velocity in velocities:
             self.set_joint_target_velocities(velocity)
             self.step_sim()
-            per_joint_metabolic_cost += self.get_joint_forces()
+            per_joint_metabolic_cost += np.abs(self.get_joint_forces())
         per_joint_metabolic_cost /= for_std * len(velocities)
         metabolic_cost = np.mean(per_joint_metabolic_cost)
         state, stateful_objects_states = self.get_data()
@@ -444,7 +444,7 @@ class SimulationConsumer(SimulationConsumerAbstract):
             self.set_joint_target_velocities(velocity)
             self.step_sim()
             frames.append(self.get_frame(cam_id))
-            per_joint_metabolic_cost += self.get_joint_forces()
+            per_joint_metabolic_cost += np.abs(self.get_joint_forces())
         per_joint_metabolic_cost /= for_std * len(velocities)
         metabolic_cost = np.mean(per_joint_metabolic_cost)
         state, stateful_objects_states = self.get_data()

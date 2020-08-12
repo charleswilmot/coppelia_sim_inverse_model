@@ -197,6 +197,10 @@ class Procedure(object):
             "collection/exploration_critic_snr_db", dtype=tf.float32)
         self.tb["collection"]["evaluation"]["critic_snr"] = Mean(
             "collection/evaluation_critic_snr_db", dtype=tf.float32)
+        self.tb["collection"]["exploration"]["metabolic_cost"] = Mean(
+            "collection/exploration_metabolic_cost", dtype=tf.float32)
+        self.tb["collection"]["evaluation"]["metabolic_cost"] = Mean(
+            "collection/evaluation_metabolic_cost", dtype=tf.float32)
         self.tb["collection"]["exploration"]["current_stddev"] = Mean(
             "collection/exploration_current_stddev", dtype=tf.float32)
         #
@@ -417,6 +421,7 @@ class Procedure(object):
                 for her_goals in her_goals_per_sim
             ]
             for simulation, her_goals in enumerate(her_goals_per_sim):
+                metabolic_costs = self.metabolic_cost_scale * self._log_data_buffer[simulation, :-1]["metabolic_costs"]
                 for her_goal in her_goals:
                     her_data = np.copy(self._train_data_buffer[simulation])
                     her_data["goals"] = her_goal
@@ -424,7 +429,7 @@ class Procedure(object):
                     current_goals = self._log_data_buffer[simulation]["current_goals"]
                     states = her_data["states"]
                     distances = np.sum(np.abs(goals - current_goals), axis=-1)
-                    rewards = distances[:-1] - distances[1:]
+                    rewards = distances[:-1] - distances[1:] - metabolic_costs
                     pure_target_actions, noisy_target_actions, noise = self.agent.get_actions(
                         states[1:],
                         goals[1:],
@@ -452,6 +457,7 @@ class Procedure(object):
             forward_targets=self._train_data_buffer[:, :-1]["forward_targets"],
             return_estimates=self._log_data_buffer[:, 1:-1]["target_return_estimates"],
             critic_targets=self._train_data_buffer[:, 1:-1]["critic_targets"],
+            metabolic_costs=self._log_data_buffer["metabolic_costs"],
             time=time_stop - time_start,
             exploration=True,
             current_stddev=self.agent.exploration_stddev.numpy()
@@ -491,7 +497,7 @@ class Procedure(object):
         self._evaluation_data_buffer[:, :-1]["forward_targets"] = states[:, 1:]
         # critic target (valid until :-1)
         distances = np.sum(np.abs(goals - current_goals), axis=-1)
-        self._evaluation_data_buffer[:, :-1]["rewards"] = distances[:, :-1] - distances[:, 1:]
+        self._evaluation_data_buffer[:, :-1]["rewards"] = \
             distances[:, :-1] - distances[:, 1:] - \
             self.metabolic_cost_scale * self._evaluation_data_buffer[:, :-1]["metabolic_costs"]
         self._evaluation_data_buffer[:, :-1]["critic_targets"] = \
@@ -514,6 +520,7 @@ class Procedure(object):
             forward_targets=self._evaluation_data_buffer[:, :-1]["forward_targets"],
             return_estimates=self._evaluation_data_buffer[:, :-1]["return_estimates"],
             critic_targets=self._evaluation_data_buffer[:, :-1]["max_step_returns"],
+            metabolic_costs=self._evaluation_data_buffer["metabolic_costs"],
             time=time_stop - time_start,
             exploration=False,
         )
@@ -526,7 +533,7 @@ class Procedure(object):
             f.write(self._visualization_data_buffer.tobytes())
 
     def accumulate_log_data(self, goals, current_goals, predicted_next_states,
-            forward_targets, return_estimates, critic_targets, time,
+            forward_targets, return_estimates, critic_targets, metabolic_costs, time,
             exploration, current_stddev=None):
         if exploration:
             tb = self.tb["collection"]["exploration"]
@@ -585,6 +592,8 @@ class Procedure(object):
         critic_snr = get_snr_db(signal, noise)
         tb["critic_snr"](np.mean(critic_snr))
         #
+        tb["metabolic_cost"](np.mean(metabolic_costs))
+        #
         if exploration:
             tb["current_stddev"](current_stddev)
 
@@ -600,7 +609,7 @@ class Procedure(object):
                     mode=self.movement_modes,
                     span=self.movement_spans
                 )))
-        return np.vstack(states), np.vstack(current_goals), np.vstack(metabolic_costs)
+        return np.vstack(states), np.vstack(current_goals), np.array(metabolic_costs)
 
     def apply_action_get_frames(self, actions, cam_id):
         with self.simulation_pool.distribute_args():
@@ -611,7 +620,7 @@ class Procedure(object):
                     mode=self.movement_modes,
                     span=self.movement_spans
                 )))
-        return np.vstack(states), np.vstack(current_goals), np.vstack(metabolic_costs), np.vstack(frames)
+        return np.vstack(states), np.vstack(current_goals), np.array(metabolic_costs), np.vstack(frames)
 
     def train(self, policy=True, critic=True, forward=True):
         data = self.buffer.sample(self.batch_size)
