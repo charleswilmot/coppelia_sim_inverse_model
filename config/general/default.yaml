@@ -236,13 +236,13 @@ procedure:
   episode_length: 25
   batch_size: 256
   discount_factor: 0.7
-  updates_per_sample: 16
+  updates_per_sample: 8
   simulation_timestep: 0.2
   movement_mode: minimalist
   movement_span_in_sec: 2
   log_freq: 1
   her:
-    max_replays: 0
+    max_replays: 2
   metabolic_cost_scale: 0.0
 
 experiment:
