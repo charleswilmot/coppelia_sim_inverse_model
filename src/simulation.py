@@ -400,6 +400,7 @@ class SimulationConsumer(SimulationConsumerAbstract):
                 ramp[:, np.newaxis] * \
                 self._upper_velocity_limits[np.newaxis]
         elif mode == "cubic_hermite":
+            shape_factor = 0.2
             x = [0, 0.5, 1]
             actions_speeds = actions[:2 * self._n_joints]
             actions_speeds = actions_speeds.reshape(
@@ -409,13 +410,18 @@ class SimulationConsumer(SimulationConsumerAbstract):
                 (2, self._n_joints))
             speeds = np.vstack([self._previous_hermite_speeds, actions_speeds])
             accelerations = np.vstack([self._previous_hermite_accelerations, actions_accelerations])
-            speeds[-1] *= 0.5
-            accelerations[-1] *= 0.5
+            speeds[-1] *= shape_factor
+            accelerations[-1] *= shape_factor
             eval = np.linspace(0, 1, span)
             poly = CubicHermiteSpline(x, speeds, accelerations)
             velocities = poly(eval) * self._upper_velocity_limits[np.newaxis]
             self._previous_hermite_speeds = speeds[-1]
             self._previous_hermite_accelerations = accelerations[-1]
+        elif mode == "full_raw":
+            velocities = actions.reshape((span, self._n_joints)) * self._upper_velocity_limits[np.newaxis]
+        elif mode == "one_raw":
+            assert(len(actions) == self._n_joints)
+            velocities = actions[np.newaxis] * self._upper_velocity_limits[np.newaxis]
         else:
             raise ValueError("Unrecognized movement mode ({})".format(mode))
         return velocities
