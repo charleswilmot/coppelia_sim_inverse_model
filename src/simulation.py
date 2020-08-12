@@ -507,20 +507,56 @@ class SimulationConsumer(SimulationConsumerAbstract):
             self.add_button(position=(-distance, 0, 0))
             self.add_button(position=(0,  distance, 0))
             self.add_button(position=(0, -distance, 0))
+        elif type == 'one_arm_8_buttons':
+            self.add_arm()
+            distance = 0.65
+            sqrt2_distance = distance / np.sqrt(2)
+            self.add_button(position=( distance, 0, 0))
+            self.add_button(position=(-distance, 0, 0))
+            self.add_button(position=(0,  distance, 0))
+            self.add_button(position=(0, -distance, 0))
+            self.add_button(position=(sqrt2_distance, sqrt2_distance, 0))
+            self.add_button(position=(-sqrt2_distance, sqrt2_distance, 0))
+            self.add_button(position=(sqrt2_distance, -sqrt2_distance, 0))
+            self.add_button(position=(-sqrt2_distance, -sqrt2_distance, 0))
+        elif type == 'one_arm_4_buttons_4_taps':
+            self.add_arm()
+            distance = 0.65
+            sqrt2_distance = distance / np.sqrt(2)
+            self.add_button(position=( distance, 0, 0))
+            self.add_button(position=(-distance, 0, 0))
+            self.add_button(position=(0,  distance, 0))
+            self.add_button(position=(0, -distance, 0))
+            self.add_tap(position=(sqrt2_distance, sqrt2_distance, 0))
+            self.add_tap(position=(-sqrt2_distance, sqrt2_distance, 0))
+            self.add_tap(position=(sqrt2_distance, -sqrt2_distance, 0))
+            self.add_tap(position=(-sqrt2_distance, -sqrt2_distance, 0))
         elif type == 'one_arm_2_buttons_2_levers':
             self.add_arm()
             distance = 0.65
-            self.add_button(position=( distance, 0, 0))
-            self.add_button(position=(-distance, 0, 0))
-            self.add_lever(position=(0,  distance, 0))
-            self.add_lever(position=(0, -distance, 0))
+            self.add_lever(position=( distance, 0, 0))
+            self.add_lever(position=(-distance, 0, 0))
+            self.add_button(position=(0,  distance, 0))
+            self.add_button(position=(0, -distance, 0))
         elif type == 'one_arm_2_buttons_1_levers_1_tap':
             self.add_arm()
             distance = 0.65
-            self.add_button(position=( distance, 0, 0))
-            self.add_button(position=(-distance, 0, 0))
-            self.add_lever(position=(0,  distance, 0))
+            self.add_lever(position=( distance, 0, 0))
+            self.add_tap(position=(-distance, 0, 0))
+            self.add_button(position=(0,  distance, 0))
+            self.add_button(position=(0, -distance, 0))
+        elif type == 'one_arm_4_buttons_2_taps_2_levers':
+            self.add_arm()
+            distance = 0.65
+            sqrt2_distance = distance / np.sqrt(2)
+            self.add_lever(position=( distance, 0, 0))
+            self.add_lever(position=(-distance, 0, 0))
+            self.add_tap(position=(0,  distance, 0))
             self.add_tap(position=(0, -distance, 0))
+            self.add_button(position=(sqrt2_distance, sqrt2_distance, 0))
+            self.add_button(position=(-sqrt2_distance, sqrt2_distance, 0))
+            self.add_button(position=(sqrt2_distance, -sqrt2_distance, 0))
+            self.add_button(position=(-sqrt2_distance, -sqrt2_distance, 0))
         else:
             raise ValueError("Unrecognized environment type ({})".format(type))
 
@@ -915,37 +951,44 @@ if __name__ == '__main__':
         simulation.stop_sim()
         simulation.close()
 
-    def test_9():
+    def test_9(mode='minimalist'):
+        np.set_printoptions(precision=3, linewidth=120, suppress=True, sign=' ')
         simulation = SimulationProducer(
             scene=MODEL_PATH + '/custom_timestep.ttt',
             gui=True
         )
         simulation.create_environment('one_arm_2_buttons_1_levers_1_tap')
-        dt = 0.2
+        dt = 0.05
+        span = int(2 / dt)
+        print('span', span)
         simulation.set_simulation_timestep(dt)
         simulation.set_control_loop_enabled(False)
         simulation.start_sim()
-        n_joints = simulation.get_n_joints()[0]
+        n_joints = simulation.get_n_joints()
 
-        N = 720
-        actions = np.random.uniform(low=-1, high=1, size=(N, n_joints))
+        N = 100
+        if mode == 'minimalist':
+            actions = np.random.uniform(low=-1, high=1, size=(N, n_joints))
+        elif mode == 'cubic_hermite':
+            actions = np.random.uniform(low=-1, high=1, size=(N, n_joints * 4))
 
         t0 = time.time()
 
         metabolic_costs = []
         for i, action in enumerate(actions):
-            _, _, metabolic_cost = simulation.apply_movement(action, span=10, mode="minimalist")
-            print(i, metabolic_cost)
+            state, _, metabolic_cost = simulation.apply_movement(action, span=span, mode=mode)
+            print(i)
+            print(state[:7])
+            print(state[7:14])
+            print(state[14:21])
+            print(state[21:])
+            print(metabolic_cost)
             metabolic_costs.append(metabolic_cost)
 
         t1 = time.time()
 
         print('mean', np.mean(metabolic_costs), 'std', np.std(metabolic_costs))
-        print("{} iteration in {:.3f} sec ({:.3f} it/sec)".format(
-            N * pool_size,
-            t1 - t0,
-            N * pool_size / (t1 - t0)
-        ))
+        print("{} iteration in {:.3f} sec ({:.3f} it/sec)".format(N, t1 - t0, N / (t1 - t0)))
         simulation.stop_sim()
         simulation.close()
 
@@ -975,4 +1018,4 @@ if __name__ == '__main__':
         simulation.close()
 
     # open_one_environment()
-    test_9()
+    test_9(mode='cubic_hermite')
