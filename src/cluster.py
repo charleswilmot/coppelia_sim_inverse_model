@@ -25,9 +25,9 @@ def start_job(cfg):
         job_name = get_job_name()
         output_flag = "--output {outdir}/%N_%j.joblog".format(outdir=experiment_path)
         job_name_flag = "--job-name {job_name}".format(job_name=job_name)
-        partition_flag = "--partition {partition}".format(partition="sleuths")
-        time.sleep(5)
-        reservation_flag = next_reservation()
+        partition, reservation = get_partition_reservation()
+        partition_flag = "--partition {partition}".format(partition=partition)
+        reservation_flag = "--reservation {reservation}".format(reservation=reservation) if reservation is not None else ""
         os.chdir(get_original_cwd())
         command_line = "sbatch {output_flag} {job_name_flag} {partition_flag} {reservation_flag} cluster.sh ".format(
             output_flag=output_flag,
@@ -37,6 +37,7 @@ def start_job(cfg):
         ) + command_line_args
         print(command_line, flush=True)
         os.system(command_line)
+        time.sleep(20)
 
 
 def get_n_free_cpus(node):
@@ -45,12 +46,51 @@ def get_n_free_cpus(node):
     return int(cpusstate[1])
 
 
+def get_free_mem(node):
+    meminfo = os.popen('sinfo -h --nodes {} -O memory,allocmem'.format(node)).read()
+    memory, allocated_memory = [int(s) for s in meminfo.split() if s.isdigit()]
+    return memory - allocated_memory
+
+
 def get_n_free_gpus(node):
     total = os.popen("sinfo -h -p sleuths -n {} -O gres".format(node)).read()
     total = int(total.split(":")[-1])
     used = os.popen("squeue -h -w {} -O gres".format(node)).read()
     used = len(used.strip("\n").split("\n"))
     return total - used
+
+
+def node_list_availability(node_list, min_cpus=10, min_free_mem=20000):
+    for node in node_list:
+        n_free_cpus = get_n_free_cpus(node)
+        free_mem = get_free_mem(node)
+        if n_free_cpus >= min_cpus and free_mem >= min_free_mem:
+            print(node, end=" -> ")
+            return True
+    return False
+
+
+def get_partition_reservation():
+    # OPTION 1
+    print("checking OPTION 1 ... ", end="")
+    if node_list_availability(["xavier", "iceman", "jubilee", "frost", "beast", "cyclops", "shadowcat"]):
+        print("free space available, sending job")
+        return "x-men", None
+    print("no free space")
+    # OPTION 2
+    print("checking OPTION 2 ... ", end="")
+    if node_list_availability(["turbine", "vane"]):
+        print("free space available, sending job")
+        return "sleuths", None
+    print("no free space")
+    # OPTION 3
+    print("checking OPTION 3 ... ", end="")
+    if node_list_availability(["jetski"]):
+        print("free space available, sending job")
+        return "sleuths", "triesch-shared"
+    print("no free space")
+    print("No space available on the cluster. Defaulting to x-men OPTION 1")
+    return "x-men", None
 
 
 def node_to_n_jobs():
