@@ -1,3 +1,43 @@
+buffer:
+  size: 100000
+
+
+simulation:
+  n: 40
+  guis:
+    -
+  environment: one_arm_4_buttons
+  n_registers: 4
+  n_joints: 7
+
+
+procedure:
+  episode_length: 25
+  batch_size: 256
+  discount_factor: 0.7
+  updates_per_sample: 8
+  simulation_timestep: 0.2
+  movement_mode: minimalist
+  movement_span_in_sec: 2
+  log_freq: 1
+  her:
+    max_replays: 2
+  metabolic_cost_scale: 0.0
+
+
+experiment:
+  n_episodes: 30000
+  policy_every: 2
+  critic_every: 1
+  forward_every: 1
+  evaluate_every: 20
+  record_episode_every: 1000000000
+  save_every: 100
+  final_recording: False
+  dump_buffers_at:
+    - 100
+
+
 agent:
   policy_learning_rate: 1e-3
   critic_learning_rate: 1e-3
@@ -77,7 +117,7 @@ agent:
           kernel_regularizer: null
           name: dense_2
           trainable: true
-          units: ${simulation.n_joints}
+          units: ${agent.action_size}
           use_bias: true
       name: sequential
     keras_version: 2.3.0-tf
@@ -217,45 +257,6 @@ agent:
           use_bias: true
       name: sequential
     keras_version: 2.3.0-tf
-
-
-buffer:
-  size: 100000
-
-
-simulation:
-  n: 40
-  guis:
-    -
-  environment: one_arm_4_buttons
-  n_registers: 4
-  n_joints: 7
-
-
-procedure:
-  episode_length: 25
-  batch_size: 256
-  discount_factor: 0.7
-  updates_per_sample: 8
-  simulation_timestep: 0.2
-  movement_mode: minimalist
-  movement_span_in_sec: 2
-  log_freq: 1
-  her:
-    max_replays: 2
-  metabolic_cost_scale: 0.0
-
-experiment:
-  n_episodes: 30000
-  policy_every: 2
-  critic_every: 1
-  forward_every: 1
-  evaluate_every: 20
-  record_episode_every: 1000000000
-  save_every: 100
-  final_recording: False
-  dump_buffers_at:
-    - 100
 
 
 hydra:
