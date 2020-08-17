@@ -329,7 +329,7 @@ class Procedure(object):
                             states, goals, exploration=False)
                     if record:
                         states, current_goals, metabolic_costs, frames = \
-                            self.apply_action_get_frames(actions, cam_id)
+                            self.apply_action_get_frames(actions.numpy(), cam_id)
                         for frame in frames:
                             frame = (frame * 255).astype(np.uint8)
                             writer.append_data(frame)
@@ -476,7 +476,7 @@ class Procedure(object):
             self._evaluation_data_buffer[:, iteration]["goals"] = goals
             self._evaluation_data_buffer[:, iteration]["current_goals"] = current_goals
             self._evaluation_data_buffer[:, iteration]["pure_actions"] = pure_actions
-            states, current_goals, metabolic_costs = self.apply_action(pure_actions)
+            states, current_goals, metabolic_costs = self.apply_action(pure_actions.numpy())
             self._evaluation_data_buffer[:, iteration]["metabolic_costs"] = metabolic_costs
         states = self._evaluation_data_buffer["states"]
         pure_actions = self._evaluation_data_buffer["pure_actions"]
