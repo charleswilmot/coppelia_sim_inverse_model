@@ -242,7 +242,8 @@ procedure:
   movement_span_in_sec: 2
   log_freq: 1
   her:
-    max_replays: 0
+    max_replays: 2
+  metabolic_cost_scale: 0.0
 
 experiment:
   n_episodes: 30000
@@ -250,9 +251,9 @@ experiment:
   critic_every: 1
   forward_every: 1
   evaluate_every: 20
-  record_episode_every: 50
+  record_episode_every: 1000000000
   save_every: 100
-  final_recording: True
+  final_recording: False
   dump_buffers_at:
     - 100
 

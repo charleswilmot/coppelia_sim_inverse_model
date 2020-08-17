@@ -15,21 +15,21 @@ PASSWORD = None
 REMOTE_HOST_NAME = 'otto'
 
 
-@hydra.main(config_path='../config/general/default.yaml', strict=True)
+@hydra.main(config_path='../config/replay/replay.yaml', strict=True)
 def start_job(cfg):
         experiment_path = os.getcwd()
         pickle_conf_path = experiment_path + '/cfg.json'
         with open(pickle_conf_path, "w") as f:
             json.dump(omegaconf.OmegaConf.to_container(cfg, resolve=True), f, indent=4)
         command_line_args  = " rundir=" + experiment_path
-        job_name = get_job_name()
+        job_name = "record_" + get_job_name()
         output_flag = "--output {outdir}/%N_%j.joblog".format(outdir=experiment_path)
         job_name_flag = "--job-name {job_name}".format(job_name=job_name)
         partition, reservation = get_partition_reservation()
         partition_flag = "--partition {partition}".format(partition=partition)
         reservation_flag = "--reservation {reservation}".format(reservation=reservation) if reservation is not None else ""
         os.chdir(get_original_cwd())
-        command_line = "sbatch {output_flag} {job_name_flag} {partition_flag} {reservation_flag} cluster.sh ".format(
+        command_line = "sbatch {output_flag} {job_name_flag} {partition_flag} {reservation_flag} cluster_record.sh ".format(
             output_flag=output_flag,
             job_name_flag=job_name_flag,
             partition_flag=partition_flag,
@@ -60,23 +60,18 @@ def get_n_free_gpus(node):
     return total - used
 
 
-def node_list_availability(node_list, min_cpus=10, min_free_mem=20000):
+def node_list_availability(node_list, min_cpus=10, min_free_mem=20000, min_free_gpus=1):
     for node in node_list:
         n_free_cpus = get_n_free_cpus(node)
+        n_free_gpus = get_n_free_gpus(node)
         free_mem = get_free_mem(node)
-        if n_free_cpus >= min_cpus and free_mem >= min_free_mem:
+        if n_free_cpus >= min_cpus and free_mem >= min_free_mem and n_free_gpus >= min_free_gpus:
             print(node, end=" -> ")
             return True
     return False
 
 
 def get_partition_reservation():
-    # OPTION 1
-    print("checking OPTION 1 ... ", end="")
-    if node_list_availability(["xavier", "iceman", "jubilee", "frost", "beast", "cyclops", "shadowcat"]):
-        print("free space available, sending job")
-        return "x-men", None
-    print("no free space")
     # OPTION 2
     print("checking OPTION 2 ... ", end="")
     if node_list_availability(["turbine", "vane"]):
@@ -89,57 +84,58 @@ def get_partition_reservation():
         print("free space available, sending job")
         return "sleuths", "triesch-shared"
     print("no free space")
-    print("No space available on the cluster. Defaulting to x-men OPTION 1")
-    return "x-men", None
+    print("No space available on the cluster. Defaulting to sleuths OPTION 2")
+    return "sleuths", None
 
 
-def node_to_n_jobs():
-    nodes = os.popen(
-        'squeue -h -u wilmot -O nodelist'
-    ).read().strip('\n').replace(' ', '').split("\n")
-    ret = defaultdict(int)
-    for node in nodes:
-        ret[node] += 1
-    return ret
+# def node_to_n_jobs():
+#     nodes = os.popen(
+#         'squeue -h -u wilmot -O nodelist'
+#     ).read().strip('\n').replace(' ', '').split("\n")
+#     ret = defaultdict(int)
+#     for node in nodes:
+#         ret[node] += 1
+#     return ret
 
 
-def reservation_to_n_jobs():
-    reservations = os.popen(
-        'squeue -h -u wilmot -O reservation'
-    ).read().strip("\n").replace(' ', '').split("\n")
-    ret = defaultdict(int)
-    for reservation in reservations:
-        ret[reservation] += 1
-    return ret
+# def reservation_to_n_jobs():
+#     reservations = os.popen(
+#         'squeue -h -u wilmot -O reservation'
+#     ).read().strip("\n").replace(' ', '').split("\n")
+#     ret = defaultdict(int)
+#     for reservation in reservations:
+#         ret[reservation] += 1
+#     return ret
 
 
-def next_reservation():
-    nodes_used = node_to_n_jobs()
-    reservations = reservation_to_n_jobs()
-    nodes = ["jetski", "turbine", "vane"]
-    free_cpus = {node: get_n_free_cpus(node) for node in nodes}
-    free_gpus = {node: get_n_free_gpus(node) for node in nodes}
-    for node in nodes:
-        cpus = free_cpus[node]
-        gpus = free_gpus[node]
-        print(node, "free cpus:", cpus, "free gpus:", gpus)
-    reservation = ""
-    if free_cpus["jetski"] >= 10 and free_gpus["jetski"] > 0:
-        reservation = "--reservation triesch-shared"
-    if reservations["triesch-shared"] * 200 < reservations["(null)"]:
-        reservation = "--reservation triesch-shared"
-    else:
-        reservation = ""
-    print("reservation: ", reservation)
-    return reservation
+# def next_reservation():
+#     nodes_used = node_to_n_jobs()
+#     reservations = reservation_to_n_jobs()
+#     nodes = ["jetski", "turbine", "vane"]
+#     free_cpus = {node: get_n_free_cpus(node) for node in nodes}
+#     free_gpus = {node: get_n_free_gpus(node) for node in nodes}
+#     for node in nodes:
+#         cpus = free_cpus[node]
+#         gpus = free_gpus[node]
+#         print(node, "free cpus:", cpus, "free gpus:", gpus)
+#     reservation = ""
+#     if free_cpus["jetski"] >= 10 and free_gpus["jetski"] > 0:
+#         reservation = "--reservation triesch-shared"
+#     if reservations["triesch-shared"] * 200 < reservations["(null)"]:
+#         reservation = "--reservation triesch-shared"
+#     else:
+#         reservation = ""
+#     print("reservation: ", reservation)
+#     return reservation
 
 
-def additional_args():
-    return " hydra.run.dir=" + os.getcwd() + "\\\n"
+# def additional_args():
+#     return " hydra.run.dir=" + os.getcwd() + "\\\n"
 
 
 def get_job_name():
-    return os.path.basename(os.getcwd())
+    path = os.path.normpath(os.getcwd())
+    return path.split(os.sep)[-2]
 
 
 def ssh_command(cmd):
@@ -149,17 +145,18 @@ def ssh_command(cmd):
     client = SSHClient()
     client.set_missing_host_key_policy(AutoAddPolicy())
     client.load_system_host_keys()
-    if PASSWORD is None:
-        PASSWORD = getpass("Please enter password for the rsa key .ssh/id_rsa\n")
-    pkey = RSAKey.from_private_key_file("/home/cwilmot/.ssh/id_rsa", password=PASSWORD)
-    client.connect(host, username=user, pkey=pkey)
+    # if PASSWORD is None:
+    #     PASSWORD = getpass("Please enter password for the rsa key .ssh/id_rsa\n")
+    # pkey = RSAKey.from_private_key_file("/home/cwilmot/.ssh/id_rsa", password=PASSWORD)
+    # client.connect(host, username=user, pkey=pkey)
+    client.connect(host, username=user, password='Her%Twok7')
     stdin, stdout, stderr = client.exec_command("""(
         eval "$(/home/wilmot/.software/miniconda/miniconda3/bin/conda shell.bash hook)" ;
         export COPPELIASIM_ROOT=/home/aecgroup/aecdata/Software/CoppeliaSim_4.0.0_rev4 ;
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$COPPELIASIM_ROOT ;
         export QT_QPA_PLATFORM_PLUGIN_PATH=$COPPELIASIM_ROOT ;
         export COPPELIASIM_MODEL_PATH=/home/wilmot/Documents/code/coppelia_sim_inverse_model/3d_models/ ;
-        cd Documents/code/coppelia_sim_inverse_model/src ;
+        cd Documents/code/duplicates_of_other_repos/coppelia_sim_inverse_model/src ;
         {})""".format(cmd))
     for line in stdout.readlines():
         print(line, end="")

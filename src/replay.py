@@ -11,6 +11,10 @@ def get_conf():
 
 
 @hydra.main(config_path="../config/replay/replay.yaml", strict=True)
+def main(cfg):
+    replay(cfg)
+
+
 def replay(cfg):
     experiment_cfg = get_conf()
     agent_conf = experiment_cfg.agent
@@ -36,4 +40,4 @@ def replay(cfg):
 
 
 if __name__ == '__main__':
-    replay()
+    main()

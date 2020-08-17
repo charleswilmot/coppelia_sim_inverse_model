@@ -4,8 +4,8 @@ import numpy as np
 from custom_layers import custom_objects
 
 
-def divide_no_nan(a, b):
-    return np.divide(a, b, out=np.zeros_like(a), where=b!=0)
+def divide_no_nan(a, b, default=0.0):
+    return np.divide(a, b, out=np.full_like(a, fill_value=default), where=b!=0)
 
 
 def model_copy(model, fake_inp):
@@ -64,7 +64,7 @@ class Agent(object):
         )
         self.critic_model_1 = keras.models.clone_model(self.critic_model_0)
         fake_inp = np.zeros(
-            shape=(1, state_size + goal_size + action_size),
+            shape=(1, state_size + goal_size + eval(str(action_size))),
             dtype=np.float32
         )
         self.target_critic_model_0 = model_copy(self.critic_model_0, fake_inp)
@@ -97,7 +97,8 @@ class Agent(object):
                 np.floor(np.log(0.0001) / np.log(self.histogram_step)),
                 np.ceil(np.log(2) / np.log(self.histogram_step))
             )
-            self.mean_reward = np.zeros(len(self.bins) + 1)
+            self.mean_reward_sum = np.zeros(len(self.bins) + 1)
+            self.mean_reward_count = np.zeros(len(self.bins) + 1)
         #   TD3
         self.target_smoothing_stddev = target_smoothing_stddev
         self.tau = tau
@@ -169,10 +170,12 @@ class Agent(object):
         print('current_bins', current_bins)
         print('rewards', rewards)
         for bin, reward in zip(current_bins, rewards):
-            self.mean_reward[bin] = (1 - c) * self.mean_reward[bin] + c * reward
+            self.mean_reward_sum[bin] = reward + (1 - c) * self.mean_reward_sum[bin]
+            self.mean_reward_count[bin] = 1 + (1 - c) * self.mean_reward_count[bin]
+        mean_reward = divide_no_nan(self.mean_reward_sum, self.mean_reward_count, default=-2.0)
         filtered_mean_reward = np.convolve(
-            self.mean_reward,
-            self.n_simulations // 2,
+            mean_reward,
+            self.n_simulations // 4,
             mode='same'
         )
         index = np.argmax(filtered_mean_reward)

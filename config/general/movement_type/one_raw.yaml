@@ -1,0 +1,5 @@
+agent:
+  action_size: ${simulation.n_joints}
+
+procedure:
+  movement_mode: one_raw
