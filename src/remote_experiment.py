@@ -5,12 +5,10 @@ import omegaconf
 import os
 
 
-@hydra.main(config_path="../config/cluster/cluster.yaml", strict=True)
+@hydra.main(config_path="../config/cluster", config_name='cluster.yaml')
 def remote_experiment(cfg):
-    with open(cfg.rundir + '/cfg.json', 'r') as f:
-        other_cfg_json = json.load(f)
     os.chdir(cfg.rundir)
-    cfg = omegaconf.OmegaConf.create(other_cfg_json)
+    cfg = omegaconf.OmegaConf.load('./cfg.yaml')
     experiment(cfg)
 
 

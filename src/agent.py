@@ -64,7 +64,7 @@ class Agent(object):
         )
         self.critic_model_1 = keras.models.clone_model(self.critic_model_0)
         fake_inp = np.zeros(
-            shape=(1, state_size + goal_size + eval(str(action_size))),
+            shape=(1, state_size + goal_size + int(action_size)),
             dtype=np.float32
         )
         self.target_critic_model_0 = model_copy(self.critic_model_0, fake_inp)

@@ -2,18 +2,20 @@ import hydra
 from procedure import Procedure
 import os
 import tensorflow as tf
+import custom_interpolations
 
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
-@hydra.main(config_path='../config/general/default.yaml', strict=True)
+
+@hydra.main(config_path="../config/general", config_name='default.yaml')
 def main(cfg):
     experiment(cfg)
 
 
 def experiment(cfg):
-    print(cfg.pretty(), end="\n\n\n")
+    print(cfg.pretty(resolve=True), end="\n\n\n")
     agent_conf = cfg.agent
     buffer_conf = cfg.buffer
     simulation_conf = cfg.simulation

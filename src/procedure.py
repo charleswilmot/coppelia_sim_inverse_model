@@ -67,7 +67,7 @@ class Procedure(object):
         self.agent = Agent(**agent_conf)
         self.buffer = Buffer(**buffer_conf)
         #   SIMULATION POOL
-        guis = simulation_conf.guis.to_container(resolve=True)
+        guis = list(simulation_conf.guis)
         self.simulation_pool = SimulationPool(
             simulation_conf.n,
             scene=MODEL_PATH + '/custom_timestep.ttt',
@@ -84,7 +84,7 @@ class Procedure(object):
         print("[procedure] all simulation started")
         self.goal_size = agent_conf.goal_size
         self.state_size = agent_conf.state_size
-        self.action_size = agent_conf.action_size
+        self.action_size = int(agent_conf.action_size)  # see https://github.com/omry/omegaconf/issues/100#issuecomment-673041383
 
         print("self.goal_size", self.goal_size)
         print("self.state_size", self.state_size)

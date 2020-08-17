@@ -1,4 +1,3 @@
-import omegaconf
 import hydra
 import os
 from hydra.utils import get_original_cwd
@@ -9,18 +8,19 @@ import sys
 from collections import defaultdict
 import json
 import time
+import custom_interpolations
 
 
 PASSWORD = None
 REMOTE_HOST_NAME = 'otto'
 
 
-@hydra.main(config_path='../config/general/default.yaml', strict=True)
+@hydra.main(config_path="../config/general", config_name='default.yaml')
 def start_job(cfg):
         experiment_path = os.getcwd()
-        pickle_conf_path = experiment_path + '/cfg.json'
-        with open(pickle_conf_path, "w") as f:
-            json.dump(omegaconf.OmegaConf.to_container(cfg, resolve=True), f, indent=4)
+        conf_path = experiment_path + '/cfg.yaml'
+        with open(conf_path, "w") as f:
+            f.write(cfg.pretty(resolve=True))
         command_line_args  = " rundir=" + experiment_path
         job_name = get_job_name()
         output_flag = "--output {outdir}/%N_%j.joblog".format(outdir=experiment_path)

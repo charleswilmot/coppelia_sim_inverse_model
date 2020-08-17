@@ -1,5 +1,6 @@
 from procedure import Procedure
 from omegaconf import OmegaConf
+import custom_interpolations
 from pathlib import Path
 import hydra
 import sys
@@ -10,7 +11,7 @@ def get_conf():
     return cfg
 
 
-@hydra.main(config_path="../config/replay/replay.yaml", strict=True)
+@hydra.main(config_path="../config/replay", config_name='replay.yaml')
 def main(cfg):
     replay(cfg)
 

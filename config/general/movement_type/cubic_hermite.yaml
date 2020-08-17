@@ -1,5 +1,6 @@
+# @package _global_
 agent:
-  action_size: ${simulation.n_joints} * 4
+  action_size: ${times:${simulation.n_joints},4}
 
 procedure:
   movement_mode: cubic_hermite
