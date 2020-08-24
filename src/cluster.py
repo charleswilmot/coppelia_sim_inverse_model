@@ -149,10 +149,12 @@ def ssh_command(cmd):
     client = SSHClient()
     client.set_missing_host_key_policy(AutoAddPolicy())
     client.load_system_host_keys()
-    if PASSWORD is None:
-        PASSWORD = getpass("Please enter password for the rsa key .ssh/id_rsa\n")
-    pkey = RSAKey.from_private_key_file("/home/cwilmot/.ssh/id_rsa", password=PASSWORD)
-    client.connect(host, username=user, pkey=pkey)
+    # if PASSWORD is None:
+    #     PASSWORD = getpass("Please enter password for the rsa key .ssh/id_rsa\n")
+    # pkey = RSAKey.from_private_key_file("/home/cwilmot/.ssh/id_rsa", password=PASSWORD)
+    # client.connect(host, username=user, pkey=pkey)
+    PASSWORD = getpass("Please enter password\n")
+    client.connect(host, username=user, password=PASSWORD)
     stdin, stdout, stderr = client.exec_command("""(
         eval "$(/home/wilmot/.software/miniconda/miniconda3/bin/conda shell.bash hook)" ;
         export COPPELIASIM_ROOT=/home/aecgroup/aecdata/Software/CoppeliaSim_4.0.0_rev4 ;
