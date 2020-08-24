@@ -67,7 +67,7 @@ class Procedure(object):
         self.agent = Agent(**agent_conf)
         self.buffer = Buffer(**buffer_conf)
         #   SIMULATION POOL
-        guis = simulation_conf.guis.to_container(resolve=True)
+        guis = list(simulation_conf.guis)
         self.simulation_pool = SimulationPool(
             simulation_conf.n,
             scene=MODEL_PATH + '/custom_timestep.ttt',
@@ -97,6 +97,8 @@ class Procedure(object):
             ("noisy_actions", np.float32, self.action_size),
             ("goals", np.float32, self.goal_size),
             ("forward_targets", np.float32, self.state_size),
+            ("predicted_next_states", np.float32, self.state_size),
+            ("next_critic_targets", np.float32),
             ("critic_targets", np.float32),
         ])
         self._train_data_buffer = np.zeros(
@@ -107,8 +109,6 @@ class Procedure(object):
         self._log_data_type = np.dtype([
             ("current_goals", np.float32, self.goal_size),
             ("pure_actions", np.float32, self.action_size),
-            ("next_pure_actions", np.float32, self.action_size),
-            ("predicted_next_states", np.float32, self.state_size),
             ("rewards", np.float32),
             ("metabolic_costs", np.float32),
             ("target_return_estimates", np.float32),
@@ -159,6 +159,9 @@ class Procedure(object):
         self.tb["training"]["critic"] = {}
         self.tb["training"]["critic"]["loss"] = Mean(
             "training/critic_loss", dtype=tf.float32)
+        self.tb["training"]["next_critic"] = {}
+        self.tb["training"]["next_critic"]["loss"] = Mean(
+            "training/next_critic_loss", dtype=tf.float32)
         self.tb["training"]["forward"] = {}
         self.tb["training"]["forward"]["loss"] = Mean(
             "training/forward_loss", dtype=tf.float32)
@@ -240,6 +243,11 @@ class Procedure(object):
             self.log_metrics(
                 "training",
                 "critic",
+                self.n_critic_training
+            )
+            self.log_metrics(
+                "training",
+                "next_critic",
                 self.n_critic_training
             )
         if policy:
@@ -354,28 +362,20 @@ class Procedure(object):
                 states,
                 noisy_actions,
             )
-            next_pure_actions = self.agent.get_actions(
+            next_return_estimate = self.agent.get_next_return_estimates(
                 predicted_next_states,
-                goals,
-                exploration=False,
-            )
-            next_return_estimate = self.agent.get_return_estimates(
-                predicted_next_states,
-                next_pure_actions,
                 goals,
             )
             indices_best = np.argmax(next_return_estimate.numpy(), axis=1).flatten()
             best_noisy_actions = noisy_actions.numpy()[sims, indices_best]
             best_predicted_next_states = predicted_next_states.numpy()[sims, indices_best]
-            best_next_pure_actions = next_pure_actions.numpy()[sims, indices_best]
             self._train_data_buffer[:, iteration]["states"] = states
             self._train_data_buffer[:, iteration]["noisy_actions"] = best_noisy_actions
             self._train_data_buffer[:, iteration]["goals"] = goals
+            self._train_data_buffer[:, iteration]["predicted_next_states"] = best_predicted_next_states
             # not necessary for training but useful for logging:
             self._log_data_buffer[:, iteration]["current_goals"] = current_goals
             self._log_data_buffer[:, iteration]["pure_actions"] = pure_actions
-            self._log_data_buffer[:, iteration]["next_pure_actions"] = best_next_pure_actions
-            self._log_data_buffer[:, iteration]["predicted_next_states"] = best_predicted_next_states
             states, current_goals, metabolic_costs = self.apply_action(best_noisy_actions)
             self._log_data_buffer[:, iteration]["metabolic_costs"] = metabolic_costs
         goals = self._train_data_buffer["goals"]
@@ -404,6 +404,8 @@ class Procedure(object):
             self._log_data_buffer[:, :-1]["rewards"] + \
             self.discount_factor * \
             self._log_data_buffer[:, 1:]["target_return_estimates"]
+        self._train_data_buffer[:, :-2]["next_critic_targets"] = \
+            self._train_data_buffer[:, 1:-1]["critic_targets"]
         self.agent.register_total_reward(np.sum(self._log_data_buffer["rewards"], axis=-1))
         # HINDSIGHT EXPERIENCE
         for_hindsight = []
@@ -443,7 +445,7 @@ class Procedure(object):
                             target=True,
                         )[..., 0]
                     for_hindsight.append(her_data[:-1])
-        regular_data = self._train_data_buffer[:, :-1].flatten()
+        regular_data = self._train_data_buffer[:, :-2].flatten()
         buffer_data = np.concatenate(for_hindsight + [regular_data], axis=0)
         self.buffer.integrate(buffer_data)
         self.n_transition_gathered += len(buffer_data)
@@ -453,7 +455,7 @@ class Procedure(object):
         self.accumulate_log_data(
             goals=self._train_data_buffer["goals"],
             current_goals=self._log_data_buffer["current_goals"],
-            predicted_next_states=self._log_data_buffer[:, :-1]["predicted_next_states"],
+            predicted_next_states=self._train_data_buffer[:, :-1]["predicted_next_states"],
             forward_targets=self._train_data_buffer[:, :-1]["forward_targets"],
             return_estimates=self._log_data_buffer[:, 1:-1]["target_return_estimates"],
             critic_targets=self._train_data_buffer[:, 1:-1]["critic_targets"],
@@ -626,9 +628,11 @@ class Procedure(object):
         data = self.buffer.sample(self.batch_size)
         losses = self.agent.train(
             data["states"],
+            data["predicted_next_states"],
             data["noisy_actions"],
             data["goals"],
             data["critic_targets"],
+            data["next_critic_targets"],
             data["forward_targets"],
             policy=policy,
             critic=critic,
@@ -641,6 +645,7 @@ class Procedure(object):
         if critic:
             self.n_critic_training += 1
             tb["critic"]["loss"](losses["critic"])
+            tb["next_critic"]["loss"](losses["next_critic"])
         if forward:
             self.n_forward_training += 1
             tb["forward"]["loss"](losses["forward"])

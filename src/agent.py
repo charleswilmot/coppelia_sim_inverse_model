@@ -40,7 +40,7 @@ def to_matching_shape(*args):
 class Agent(object):
     def __init__(self,
             policy_learning_rate, policy_model_arch,
-            critic_learning_rate, critic_model_arch,
+            critic_learning_rate, critic_model_arch, next_critic_model_arch,
             forward_learning_rate, forward_model_arch,
             exploration, target_smoothing_stddev, tau,
             state_size, action_size, goal_size, n_simulations):
@@ -70,6 +70,12 @@ class Agent(object):
         self.target_critic_model_0 = model_copy(self.critic_model_0, fake_inp)
         self.target_critic_model_1 = model_copy(self.critic_model_1, fake_inp)
         self.critic_optimizer = keras.optimizers.Adam(self.critic_learning_rate)
+        # next critic
+        self.next_critic_model = keras.models.model_from_yaml(
+            next_critic_model_arch.pretty(resolve=True),
+            custom_objects=custom_objects
+        )
+        self.next_critic_optimizer = keras.optimizers.Adam(self.critic_learning_rate)
         #   FORWARD
         self.forward_learning_rate = forward_learning_rate
         self.forward_model = keras.models.model_from_yaml(
@@ -208,14 +214,27 @@ class Agent(object):
             return (self.critic_model_0(inps) + self.critic_model_1(inps)) / 2
 
     @tf.function
-    def train_critic(self, states, actions, goals, targets):
+    def get_next_return_estimates(self, predicted_next_states, goals):
+        predicted_next_states, goals = to_matching_shape(predicted_next_states, goals)
+        inps = tf.concat([predicted_next_states, tf.cast(goals, tf.float32)], axis=-1)
+        return self.next_critic_model(inps)
+
+    @tf.function
+    def train_critic(self, states, predicted_next_states, actions, goals, targets, next_targets):
         with tf.GradientTape() as tape:
             estimates = self.get_return_estimates(states, actions, goals)
-            loss = keras.losses.Huber()(estimates, tf.stop_gradient(targets))
+            loss_critic = keras.losses.Huber()(estimates, tf.stop_gradient(targets))
             vars = self.critic_model_0.variables + self.critic_model_1.variables
-            grads = tape.gradient(loss, vars)
+            grads = tape.gradient(loss_critic, vars)
             self.critic_optimizer.apply_gradients(zip(grads, vars))
-        return loss
+
+        with tf.GradientTape() as tape:
+            estimates = self.get_next_return_estimates(predicted_next_states, goals)
+            loss_next_critic = keras.losses.Huber()(estimates, tf.stop_gradient(next_targets))
+            vars = self.next_critic_model.variables
+            grads = tape.gradient(loss_next_critic, vars)
+            self.next_critic_optimizer.apply_gradients(zip(grads, vars))
+        return loss_critic, loss_next_critic
 
     @tf.function
     def train_policy(self, states, goals):
@@ -254,12 +273,15 @@ class Agent(object):
                 )
 
     @tf.function
-    def train(self, states, actions, goals, critic_target, forward_target,
-            policy=True, critic=True, forward=True):
+    def train(self, states, predicted_next_states, actions, goals,
+            critic_target, next_critic_target, forward_target, policy=True, critic=True,
+            forward=True):
         losses = {}
         if critic:
-            critic_loss = self.train_critic(states, actions, goals, critic_target)
+            critic_loss, next_critic_loss = self.train_critic(
+                states, predicted_next_states, actions, goals, critic_target, next_critic_target)
             losses["critic"] = critic_loss
+            losses["next_critic"] = next_critic_loss
         if forward:
             forward_loss = self.train_forward(states, actions, forward_target)
             losses["forward"] = forward_loss
