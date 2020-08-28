@@ -12,7 +12,7 @@ agent:
     stddev: 1.0
     n: 1
     autotune_scale: 0.5
-    success_rate_estimator_speed: 0.1
+    success_rate_estimator_speed: 0.01
 
   policy_model_arch:
     backend: tensorflow
