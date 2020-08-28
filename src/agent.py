@@ -17,30 +17,10 @@ def model_copy(model, fake_inp):
     return clone
 
 
-@tf.function
-def to_matching_shape(*args):
-    ranks = [len(t.get_shape()) for t in args]
-    rank_2 = [r == 2 for r in ranks]
-    rank_3 = [r == 3 for r in ranks]
-    n_rank_2 = rank_2.count(True)
-    n_rank_3 = rank_3.count(True)
-    print("tracing with {} rank 2 and {} rank 3".format(n_rank_2, n_rank_3))
-    ret = []
-    if n_rank_2 and n_rank_3:
-        axis_1_size = args[rank_3.index(True)].shape[1]
-        for rank, tensor in zip(ranks, args):
-            if rank == 2:
-                tensor = tf.stack([tensor for i in range(axis_1_size)], axis=1)
-            ret.append(tensor)
-        return ret
-    else:
-        return args
-
-
 class Agent(object):
     def __init__(self,
             policy_learning_rate, policy_model_arch,
-            critic_learning_rate, critic_model_arch, next_critic_model_arch,
+            critic_learning_rate, critic_model_arch,
             forward_learning_rate, forward_model_arch,
             exploration, target_smoothing_stddev, tau,
             state_size, action_size, goal_size, n_simulations):
@@ -70,12 +50,6 @@ class Agent(object):
         self.target_critic_model_0 = model_copy(self.critic_model_0, fake_inp)
         self.target_critic_model_1 = model_copy(self.critic_model_1, fake_inp)
         self.critic_optimizer = keras.optimizers.Adam(self.critic_learning_rate)
-        # next critic
-        self.next_critic_model = keras.models.model_from_yaml(
-            next_critic_model_arch.pretty(resolve=True),
-            custom_objects=custom_objects
-        )
-        self.next_critic_optimizer = keras.optimizers.Adam(self.critic_learning_rate)
         #   FORWARD
         self.forward_learning_rate = forward_learning_rate
         self.forward_model = keras.models.model_from_yaml(
@@ -124,50 +98,28 @@ class Agent(object):
         self.target_critic_model_1.load_weights(path + "/target_critic_model_1")
 
     @tf.function
-    def get_actions(self, states, goals, exploration=False, target=False,
-            n_simulation_respected=True):
-        states, goals = to_matching_shape(states, goals)
+    def get_actions(self, states, goals, exploration=False, target=False):
         inps = tf.concat([states, tf.cast(goals, tf.float32)], axis=-1)
-        if target:
-            exploration = True
-            stddev = self.target_smoothing_stddev
-            pure_actions = self.target_policy_model(inps)
-            shape = tf.shape(pure_actions)
-            broadcast_actions = False
+        if target or exploration:
+            if target:
+                stddev = self.target_smoothing_stddev
+                pure_actions = self.target_policy_model(inps)
+            else:
+                stddev = self.exploration_stddev
+                pure_actions = self.policy_model(inps)
             noises = tf.random.truncated_normal(
-                shape=shape,
+                shape=tf.shape(pure_actions),
                 stddev=stddev,
             )
-            pure_actions_reshaped = pure_actions
             noisy_actions = tf.clip_by_value(
-                pure_actions_reshaped + noises,
+                pure_actions + noises,
                 clip_value_min=-1,
                 clip_value_max=1
             )
-            noises = noisy_actions - pure_actions_reshaped
+            noises = noisy_actions - pure_actions
             return pure_actions, noisy_actions, noises
         else:
-            stddev = self.exploration_stddev
-            pure_actions = self.policy_model(inps)
-            shape = tf.shape(pure_actions)
-            shape = tf.concat([shape[:1], [self.exploration_n], shape[1:]], axis=0)
-            if exploration:
-                noises = tf.random.truncated_normal(
-                    shape=shape,
-                    stddev=stddev,
-                )
-                if n_simulation_respected:
-                    noises *= self.stddev_coefs[:, np.newaxis, np.newaxis]
-                pure_actions_reshaped = pure_actions[:, tf.newaxis]
-                noisy_actions = tf.clip_by_value(
-                    pure_actions_reshaped + noises,
-                    clip_value_min=-1,
-                    clip_value_max=1
-                )
-                noises = noisy_actions - pure_actions_reshaped
-                return pure_actions, noisy_actions, noises
-            else:
-                return pure_actions
+            return self.policy_model(inps)
 
     def register_total_reward(self, rewards):
         stddevs = self.stddev_coefs * self.exploration_stddev
@@ -178,15 +130,9 @@ class Agent(object):
         for bin, reward in zip(current_bins, rewards):
             self.mean_reward_sum[bin] = reward + (1 - c) * self.mean_reward_sum[bin]
             self.mean_reward_count[bin] = 1 + (1 - c) * self.mean_reward_count[bin]
-        mean_reward = divide_no_nan(self.mean_reward_sum, self.mean_reward_count, default=-2.0)
-        filtered_mean_reward = np.convolve(
-            mean_reward,
-            self.n_simulations // 4,
-            mode='same'
-        )
-        index = np.argmax(filtered_mean_reward)
-        print('filtered_mean_reward', filtered_mean_reward)
-        print('index', index)
+        mean_reward = divide_no_nan(self.mean_reward_sum, self.mean_reward_count, default=-np.inf)
+        index = np.argmax(mean_reward)
+        print('mean_reward', mean_reward)
         if index == 0:
             best_std = self.bins[0]
         elif index == len(self.bins):
@@ -198,13 +144,11 @@ class Agent(object):
 
     @tf.function
     def get_predictions(self, states, actions):
-        states, actions = to_matching_shape(states, actions)
         inps = tf.concat([states, actions], axis=-1)
         return self.forward_model(inps)
 
     @tf.function
     def get_return_estimates(self, states, actions, goals, target=False):
-        states, actions, goals = to_matching_shape(states, actions, goals)
         inps = tf.concat([states, actions, tf.cast(goals, tf.float32)], axis=-1)
         if target:
             target_0 = self.target_critic_model_0(inps)
@@ -214,27 +158,14 @@ class Agent(object):
             return (self.critic_model_0(inps) + self.critic_model_1(inps)) / 2
 
     @tf.function
-    def get_next_return_estimates(self, predicted_next_states, goals):
-        predicted_next_states, goals = to_matching_shape(predicted_next_states, goals)
-        inps = tf.concat([predicted_next_states, tf.cast(goals, tf.float32)], axis=-1)
-        return self.next_critic_model(inps)
-
-    @tf.function
-    def train_critic(self, states, predicted_next_states, actions, goals, targets, next_targets):
+    def train_critic(self, states, actions, goals, targets):
         with tf.GradientTape() as tape:
             estimates = self.get_return_estimates(states, actions, goals)
             loss_critic = keras.losses.Huber()(estimates, tf.stop_gradient(targets))
             vars = self.critic_model_0.variables + self.critic_model_1.variables
             grads = tape.gradient(loss_critic, vars)
             self.critic_optimizer.apply_gradients(zip(grads, vars))
-
-        with tf.GradientTape() as tape:
-            estimates = self.get_next_return_estimates(predicted_next_states, goals)
-            loss_next_critic = keras.losses.Huber()(estimates, tf.stop_gradient(next_targets))
-            vars = self.next_critic_model.variables
-            grads = tape.gradient(loss_next_critic, vars)
-            self.next_critic_optimizer.apply_gradients(zip(grads, vars))
-        return loss_critic, loss_next_critic
+        return loss_critic
 
     @tf.function
     def train_policy(self, states, goals):
@@ -273,15 +204,13 @@ class Agent(object):
                 )
 
     @tf.function
-    def train(self, states, predicted_next_states, actions, goals,
-            critic_target, next_critic_target, forward_target, policy=True, critic=True,
-            forward=True):
+    def train(self, states, actions, goals, critic_target, forward_target,
+            policy=True, critic=True, forward=True):
         losses = {}
         if critic:
-            critic_loss, next_critic_loss = self.train_critic(
-                states, predicted_next_states, actions, goals, critic_target, next_critic_target)
+            critic_loss = self.train_critic(
+                states, actions, goals, critic_target)
             losses["critic"] = critic_loss
-            losses["next_critic"] = next_critic_loss
         if forward:
             forward_loss = self.train_forward(states, actions, forward_target)
             losses["forward"] = forward_loss
