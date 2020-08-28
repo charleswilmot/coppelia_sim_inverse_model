@@ -444,7 +444,9 @@ class Procedure(object):
                             goals[1:],
                             target=True,
                         )[..., 0]
-                    for_hindsight.append(her_data[:-1])
+                    her_data[:-2]["next_critic_targets"] = \
+                        her_data[1:-1]["critic_targets"]
+                    for_hindsight.append(her_data[:-2])
         regular_data = self._train_data_buffer[:, :-2].flatten()
         buffer_data = np.concatenate(for_hindsight + [regular_data], axis=0)
         self.buffer.integrate(buffer_data)
