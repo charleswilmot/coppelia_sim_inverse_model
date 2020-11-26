@@ -430,14 +430,11 @@ class SimulationConsumer(SimulationConsumerAbstract):
     @communicate_return_value
     def apply_movement(self, actions, mode='minimalist', span=10):
         velocities = self.get_movement_velocities(actions, mode=mode, span=span)
-        for_std = np.array([91, 94, 43, 67, 12, 8.7, 2.3])
-        per_joint_metabolic_cost = np.zeros(self._n_joints, dtype=np.float32)
+        normalized_velocities = velocities / self._upper_velocity_limits[np.newaxis]
+        metabolic_cost = np.sum(normalized_velocities ** 2)
         for velocity in velocities:
             self.set_joint_target_velocities(velocity)
             self.step_sim()
-            per_joint_metabolic_cost += np.abs(self.get_joint_forces())
-        per_joint_metabolic_cost /= for_std * len(velocities)
-        metabolic_cost = np.mean(per_joint_metabolic_cost)
         state, stateful_objects_states = self.get_data()
         return state, stateful_objects_states, metabolic_cost
 
