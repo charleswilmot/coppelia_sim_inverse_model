@@ -10,7 +10,7 @@ def get_conf():
     return cfg
 
 
-@hydra.main(config_path="../config/replay/replay.yaml", strict=True)
+@hydra.main(config_path="../config/replay/", config_name="replay.yaml")
 def main(cfg):
     replay(cfg)
 
