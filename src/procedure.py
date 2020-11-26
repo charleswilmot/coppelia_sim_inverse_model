@@ -474,7 +474,7 @@ class Procedure(object):
                             target=True,
                         )[..., 0]
                     for_hindsight.append(her_data[:-1])
-        regular_data = self._train_data_buffer[:, :-2].flatten()
+        regular_data = self._train_data_buffer[:, :-1].flatten()
         buffer_data = np.concatenate(for_hindsight + [regular_data], axis=0)
         self.buffer.integrate(buffer_data)
         self.n_transition_gathered += len(buffer_data)
