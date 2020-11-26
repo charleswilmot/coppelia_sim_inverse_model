@@ -233,25 +233,25 @@ class Procedure(object):
             self.log_metrics(
                 "collection",
                 "evaluation",
-                self.n_evaluation_episodes
+                self.n_exploration_episodes
             )
         if critic:
             self.log_metrics(
                 "training",
                 "critic",
-                self.n_critic_training
+                self.n_exploration_episodes
             )
         if policy:
             self.log_metrics(
                 "training",
                 "policy",
-                self.n_policy_training
+                self.n_exploration_episodes
             )
         if forward:
             self.log_metrics(
                 "training",
                 "forward",
-                self.n_forward_training
+                self.n_exploration_episodes
             )
 
     def _get_current_training_ratio(self):
