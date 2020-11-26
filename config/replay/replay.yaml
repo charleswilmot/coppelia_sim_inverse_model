@@ -6,6 +6,8 @@ exploration: False
 resolution:
   - 320
   - 240
+overlay: False
+n_overlays: 5
 
 hydra:
   run:

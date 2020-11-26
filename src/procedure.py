@@ -287,10 +287,12 @@ class Procedure(object):
         actuators in the simulation for each simulation"""
         return np.random.randint(2, size=(n, self.goal_size))
 
-    def reset_simulations(self, register_states, register_goals):
+    def reset_simulations(self, register_states, register_goals, actions=None):
+        if actions is None:
+            actions = [None] * len(register_states)
         with self.simulation_pool.distribute_args():
             states, current_goals = \
-                tuple(zip(*self.simulation_pool.reset(register_states, register_goals)))
+                tuple(zip(*self.simulation_pool.reset(register_states, register_goals, actions)))
         return np.vstack(states), np.vstack(current_goals)
 
     def replay(self, exploration=False, record=False, n_episodes=10,
@@ -328,8 +330,8 @@ class Procedure(object):
                             states, goals, exploration=False)
                     if record:
                         states, current_goals, metabolic_costs, frames = \
-                            self.apply_action_get_frames(actions, cam_id)
-                        for frame in frames:
+                            self.apply_action_get_frames(actions, [cam_id])
+                        for frame in frames[0]:
                             frame = (frame * 255).astype(np.uint8)
                             writer.append_data(frame)
                     else:
@@ -338,6 +340,51 @@ class Procedure(object):
             if record:
                 writer.close()
                 self.simulation_pool.delete_camera(cam_id)
+
+    def replay_overlay(self, max_overlays=5, record=False, n_episodes=10, video_name='overlay.mp4', resolution=[320, 240]):
+        """Applies the current policy in the environment"""
+        n_overlays = min(max_overlays, self.n_simulations)
+        with self.simulation_pool.specific(list(range(n_overlays))):
+            if record:
+                writer = get_writer(video_name)
+                cam_ids = self.simulation_pool.add_camera(
+                    position=(1.15, 1.35, 1),
+                    orientation=(
+                        24 * np.pi / 36,
+                        -7 * np.pi / 36,
+                         4 * np.pi / 36
+                    ),
+                    resolution=resolution
+                )
+            for i in range(n_episodes):
+                print("replay: episode", i)
+                goals = np.repeat(self.sample_goals(1), n_overlays, axis=0)
+                register_states = np.repeat(self.sample_goals(1), n_overlays, axis=0)
+                actions = np.random.uniform(size=(n_overlays, 7), low=-1, high=1) * np.linspace(0, 1, n_overlays)[:, np.newaxis]
+                states, current_goals = self.reset_simulations(register_states, goals, actions)
+                if record:
+                    with self.simulation_pool.distribute_args():
+                        frame = np.mean(self.simulation_pool.get_frame(cam_ids), axis=0)
+                    frame = (frame * 255).astype(np.uint8)
+                    for i in range(24):
+                        writer.append_data(frame)
+                for iteration in range(self.episode_length):
+                    actions = self.agent.get_actions(
+                        states, goals, exploration=False)
+                    if record:
+                        states, current_goals, metabolic_costs, frames_per_sim = \
+                            self.apply_action_get_frames(actions, cam_ids)
+                        frames = np.mean(frames_per_sim, axis=0)
+                        for frame in frames:
+                            frame = (frame * 255).astype(np.uint8)
+                            writer.append_data(frame)
+                    else:
+                        states, current_goals, metabolic_costs = \
+                            self.apply_action(actions)
+            if record:
+                writer.close()
+                with self.simulation_pool.distribute_args():
+                    self.simulation_pool.delete_camera(cam_ids)
 
     def collect_data(self):
         """Performs one episode of exploration, places data in the buffer"""
@@ -595,16 +642,16 @@ class Procedure(object):
                 )))
         return np.vstack(states), np.vstack(current_goals), np.array(metabolic_costs)
 
-    def apply_action_get_frames(self, actions, cam_id):
+    def apply_action_get_frames(self, actions, cam_ids):
         with self.simulation_pool.distribute_args():
             states, current_goals, metabolic_costs, frames = \
                 tuple(zip(*self.simulation_pool.apply_movement_get_frames(
                     actions,
-                    [cam_id for i in range(len(self.movement_spans))],
+                    cam_ids,
                     mode=self.movement_modes,
                     span=self.movement_spans
                 )))
-        return np.vstack(states), np.vstack(current_goals), np.array(metabolic_costs), np.vstack(frames)
+        return np.array(states), np.array(current_goals), np.array(metabolic_costs), np.array(frames)
 
     def train(self, policy=True, critic=True, forward=True):
         data = self.buffer.sample(self.batch_size)
