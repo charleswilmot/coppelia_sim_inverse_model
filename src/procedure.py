@@ -392,7 +392,6 @@ class Procedure(object):
         register_states = self.sample_goals()
         states, current_goals = self.reset_simulations(register_states, goals)
         time_start = time.time()
-        sims = np.arange(self.n_simulations)
         for iteration in range(self.episode_length):
             pure_actions, noisy_actions, noises = self.agent.get_actions(
                 states, goals, exploration=True)
