@@ -442,18 +442,18 @@ class Procedure(object):
             her_goals_per_sim = [
                 np.unique(trajectory_goals, axis=0)
                 for trajectory_goals in current_goals
-            ]
+            ] # all 'current_goal' visited during one episode, for each sim
             her_goals_per_sim = [
                 her_goals[(her_goals != true_goal).any(axis=-1)]
                 for her_goals, true_goal in zip(her_goals_per_sim, goals[:, 0])
-            ]
+            ] # filter out the actual true goal pursued during the episode
             her_goals_per_sim = [
                 her_goals[-self.her_max_replays:]
                 for her_goals in her_goals_per_sim
-            ]
+            ] # keep up to 'her_max_replays' of those goals (from the last)
             for simulation, her_goals in enumerate(her_goals_per_sim):
                 metabolic_costs = self.metabolic_cost_scale * self._log_data_buffer[simulation, :-1]["metabolic_costs"]
-                for her_goal in her_goals:
+                for her_goal in her_goals: # for each simulation, for each fake (HER) goal
                     her_data = np.copy(self._train_data_buffer[simulation])
                     her_data["goals"] = her_goal
                     goals = her_data["goals"]
