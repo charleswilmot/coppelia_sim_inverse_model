@@ -246,6 +246,7 @@ procedure:
   metabolic_cost_scale: 0.005
 
 experiment:
+  repetition: 0
   n_episodes: 30000
   policy_every: 2
   critic_every: 1
