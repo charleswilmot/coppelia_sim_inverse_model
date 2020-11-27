@@ -8,11 +8,6 @@ agent:
   n_simulations: ${simulation.n}
   target_smoothing_stddev: 0.01
   tau: 0.001
-  exploration:
-    stddev: 1.0
-    n: 1
-    autotune_scale: 0.5
-    success_rate_estimator_speed: 0.01
 
   policy_model_arch:
     backend: tensorflow
@@ -244,6 +239,13 @@ procedure:
   her:
     max_replays: 2
   metabolic_cost_scale: 0.005
+  std_autotuner:
+    length: 100
+    autotune_scale: 0.301
+    importance_ratio: 100
+    stddev_init: 1.0
+    reward_init: 2.0
+    filter_size: 1.0
 
 experiment:
   repetition: 0

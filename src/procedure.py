@@ -10,6 +10,7 @@ from visualization import Visualization, visualization_data_type
 from collections import OrderedDict
 from tensorboard.plugins.hparams import api as hp
 from imageio import get_writer
+from std_autotune import STDAutoTuner
 
 
 def get_snr_db(signal, noise, axis=1):
@@ -48,6 +49,18 @@ class Procedure(object):
         self.her_max_replays = procedure_conf.her.max_replays
         self.discount_factor = procedure_conf.discount_factor
         self.metabolic_cost_scale = procedure_conf.metabolic_cost_scale
+        self.std_autotuner = STDAutoTuner(
+            procedure_conf.std_autotuner.length,
+            self.n_simulations,
+            procedure_conf.std_autotuner.autotune_scale,
+            importance_ratio=procedure_conf.std_autotuner.importance_ratio
+        )
+        self.std_autotuner.init(
+            np.log(procedure_conf.std_autotuner.stddev_init),
+            procedure_conf.std_autotuner.reward_init,
+        )
+        self.std_autotuner_filter_size = procedure_conf.std_autotuner.filter_size
+        self.std_autotuner_plot_path = './std_autotuner/'
         #    HPARAMS
         self._hparams = OrderedDict([
             ("policy_LR", agent_conf.policy_learning_rate),
@@ -56,8 +69,6 @@ class Procedure(object):
             ("update_rate", procedure_conf.updates_per_sample),
             ("ep_length", procedure_conf.episode_length),
             ("batch_size", procedure_conf.batch_size),
-            ("noise_std", agent_conf.exploration.stddev),
-            ("noise_n", agent_conf.exploration.n),
             ("tau", agent_conf.tau),
             ("target_smoothing", agent_conf.target_smoothing_stddev),
             ("movement_mode", procedure_conf.movement_mode),
@@ -209,6 +220,7 @@ class Procedure(object):
         # TREE STRUCTURE
         os.makedirs('./replays', exist_ok=True)
         os.makedirs('./visualization_data', exist_ok=True)
+        os.makedirs(self.std_autotuner_plot_path, exist_ok=True)
 
     def dump_buffers(self):
         os.makedirs('./buffers', exist_ok=True)
@@ -434,7 +446,16 @@ class Procedure(object):
             self._log_data_buffer[:, :-1]["rewards"] + \
             self.discount_factor * \
             self._log_data_buffer[:, 1:]["target_return_estimates"]
-        self.agent.register_total_reward(np.sum(self._log_data_buffer["rewards"], axis=-1))
+        log_stddevs = self.agent.get_log_stddevs()
+        rewards = np.sum(self._log_data_buffer["rewards"], axis=-1)
+        self.std_autotuner.register_rewards(log_stddevs, rewards)
+        log_stddevs = self.std_autotuner.get_log_stddevs(self.std_autotuner_filter_size)
+        stddev = np.exp(log_stddevs[len(log_stddevs) // 2])
+        self.agent.set_log_stddevs(log_stddevs)
+        self.std_autotuner.save_plot(
+            self.std_autotuner_plot_path + '{:07d}.png'.format(self.n_exploration_episodes),
+            self.std_autotuner_filter_size
+        )
         # HINDSIGHT EXPERIENCE
         for_hindsight = []
         if self.her_max_replays > 0:
@@ -490,7 +511,7 @@ class Procedure(object):
             metabolic_costs=self._log_data_buffer["metabolic_costs"],
             time=time_stop - time_start,
             exploration=True,
-            current_stddev=self.agent.exploration_stddev.numpy()
+            current_stddev=stddev
         )
 
     def evaluate(self):
