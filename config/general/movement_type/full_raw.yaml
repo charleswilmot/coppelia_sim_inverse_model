@@ -1,5 +1,0 @@
-agent:
-  action_size: int(${simulation.n_joints} * ${procedure.movement_span_in_sec} / ${procedure.simulation_timestep})
-
-procedure:
-  movement_mode: full_raw

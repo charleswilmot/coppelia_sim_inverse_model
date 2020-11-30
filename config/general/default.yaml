@@ -1,188 +1,5 @@
-agent:
-  policy_learning_rate: 1e-3
-  critic_learning_rate: 1e-3
-  state_size: 25
-  action_size: ${simulation.n_joints}
-  goal_size: ${simulation.n_registers}
-  n_simulations: ${simulation.n}
-  target_smoothing_stddev: 0.01
-  tau: 0.001
-  exploration_prob: 0.2
-
-  policy_model_arch:
-    backend: tensorflow
-    class_name: Sequential
-    config:
-      layers:
-      - class_name: Dense
-        config:
-          activation: relu
-          activity_regularizer: null
-          bias_constraint: null
-          bias_initializer:
-            class_name: Zeros
-            config: {}
-          bias_regularizer: null
-          dtype: float32
-          kernel_constraint: null
-          kernel_initializer:
-            class_name: GlorotUniform
-            config:
-              seed: null
-          kernel_regularizer: null
-          name: dense
-          trainable: true
-          units: 200
-          use_bias: true
-      - class_name: Dense
-        config:
-          activation: relu
-          activity_regularizer: null
-          bias_constraint: null
-          bias_initializer:
-            class_name: Zeros
-            config: {}
-          bias_regularizer: null
-          dtype: float32
-          kernel_constraint: null
-          kernel_initializer:
-            class_name: GlorotUniform
-            config:
-              seed: null
-          kernel_regularizer: null
-          name: dense_1
-          trainable: true
-          units: 200
-          use_bias: true
-      - class_name: Dense
-        config:
-          activation: tanh
-          activity_regularizer: null
-          bias_constraint: null
-          bias_initializer:
-            class_name: Zeros
-            config: {}
-          bias_regularizer: null
-          dtype: float32
-          kernel_constraint: null
-          kernel_initializer:
-            class_name: GlorotUniform
-            config:
-              seed: null
-          kernel_regularizer: null
-          name: dense_2
-          trainable: true
-          units: ${simulation.n_joints}
-          use_bias: true
-      name: sequential
-    keras_version: 2.3.0-tf
-
-  critic_model_arch:
-    backend: tensorflow
-    class_name: Sequential
-    config:
-      layers:
-      - class_name: Dense
-        config:
-          activation: relu
-          activity_regularizer: null
-          bias_constraint: null
-          bias_initializer:
-            class_name: Zeros
-            config: {}
-          bias_regularizer: null
-          dtype: float32
-          kernel_constraint: null
-          kernel_initializer:
-            class_name: GlorotUniform
-            config:
-              seed: null
-          kernel_regularizer: null
-          name: dense
-          trainable: true
-          units: 200
-          use_bias: true
-      - class_name: Dense
-        config:
-          activation: relu
-          activity_regularizer: null
-          bias_constraint: null
-          bias_initializer:
-            class_name: Zeros
-            config: {}
-          bias_regularizer: null
-          dtype: float32
-          kernel_constraint: null
-          kernel_initializer:
-            class_name: GlorotUniform
-            config:
-              seed: null
-          kernel_regularizer: null
-          name: dense_1
-          trainable: true
-          units: 200
-          use_bias: true
-      - class_name: Dense
-        config:
-          activation: linear
-          activity_regularizer: null
-          bias_constraint: null
-          bias_initializer:
-            class_name: Zeros
-            config: {}
-          bias_regularizer: null
-          dtype: float32
-          kernel_constraint: null
-          kernel_initializer:
-            class_name: GlorotUniform
-            config:
-              seed: null
-          kernel_regularizer: null
-          name: dense_2
-          trainable: true
-          units: 1
-          use_bias: true
-      name: sequential
-    keras_version: 2.3.0-tf
-
-
 buffer:
   size: 100000
-
-
-simulation:
-  n: 40
-  guis:
-    -
-  environment: one_arm_4_buttons
-  n_registers: 4
-  n_joints: 7
-
-
-procedure:
-  episode_length: 25
-  batch_size: 256
-  discount_factor: 0.7
-  noise_magnitude_limit: 0.01
-  one_step: False
-  updates_per_sample: 8
-  simulation_timestep: 0.2
-  movement_mode: minimalist
-  movement_span_in_sec: 2
-  log_freq: 1
-  her:
-    max_replays: 2
-  metabolic_cost_scale: 0.005
-  std_autotuner:
-    length: 400
-    min_stddev: 0.1
-    max_stddev: 1.0
-    importance_ratio: 6000
-    stddev_init: 10.0
-    reward_init: -10.0
-    filter_size: 0.4
-    std_importance: 1.5
-    temperature: 1.0
 
 experiment:
   repetition: 0
@@ -195,6 +12,15 @@ experiment:
   final_recording: False
   dump_buffers_at:
     - 100
+
+defaults:
+  - agent: default
+  - agent/policy_model_arch: default
+  - agent/critic_model_arch: default
+  - procedure: default
+  - procedure/std_autotuner: default
+  - simulation: default
+
 
 
 hydra:

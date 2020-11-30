@@ -1,0 +1,8 @@
+# @package _group_
+
+n: 40
+guis:
+  -
+environment: one_arm_4_buttons
+n_registers: 4
+n_joints: 7

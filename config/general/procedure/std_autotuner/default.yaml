@@ -1,0 +1,11 @@
+# @package _group_
+
+length: 400
+min_stddev: 0.1
+max_stddev: 1.0
+importance_ratio: 6000
+stddev_init: 10.0
+reward_init: -10.0
+filter_size: 0.4
+std_importance: 1.5
+temperature: 1.0

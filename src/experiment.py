@@ -3,6 +3,7 @@ import omegaconf
 from procedure import Procedure
 import os
 import tensorflow as tf
+import custom_interpolations
 
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'

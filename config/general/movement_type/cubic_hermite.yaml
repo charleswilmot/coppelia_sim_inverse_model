@@ -1,5 +1,0 @@
-agent:
-  action_size: ${simulation.n_joints} * 4
-
-procedure:
-  movement_mode: cubic_hermite

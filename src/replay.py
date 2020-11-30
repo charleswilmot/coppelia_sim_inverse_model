@@ -3,6 +3,7 @@ from omegaconf import OmegaConf
 from pathlib import Path
 import hydra
 import sys
+import custom_interpolations
 
 
 def get_conf():

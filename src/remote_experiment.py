@@ -3,6 +3,7 @@ import hydra
 import json
 import omegaconf
 import os
+import custom_interpolations
 
 
 @hydra.main(config_path="../config/cluster", config_name="cluster.yaml")

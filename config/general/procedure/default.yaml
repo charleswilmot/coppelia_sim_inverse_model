@@ -1,0 +1,16 @@
+# @package _group_
+
+episode_length: 25
+batch_size: 256
+discount_factor: 0.7
+noise_magnitude_limit: 0.01
+one_step: False
+updates_per_sample: 8
+simulation_timestep: 0.2
+movement_mode: minimalist
+movement_span_in_sec: 2
+policy_output_size: ${get_policy_output_size:${procedure.movement_mode},${procedure.simulation_timestep},${procedure.movement_span_in_sec},${simulation.n_joints}}
+log_freq: 1
+her:
+  max_replays: 2
+metabolic_cost_scale: 0.005
