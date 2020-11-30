@@ -1,7 +1,6 @@
 agent:
   policy_learning_rate: 1e-3
   critic_learning_rate: 1e-3
-  forward_learning_rate: 1e-3
   state_size: 25
   action_size: ${simulation.n_joints}
   goal_size: ${simulation.n_registers}
@@ -146,74 +145,6 @@ agent:
       name: sequential
     keras_version: 2.3.0-tf
 
-  forward_model_arch:
-    backend: tensorflow
-    class_name: Sequential
-    config:
-      layers:
-      - class_name: Dense
-        config:
-          activation: relu
-          activity_regularizer: null
-          bias_constraint: null
-          bias_initializer:
-            class_name: Zeros
-            config: {}
-          bias_regularizer: null
-          dtype: float32
-          kernel_constraint: null
-          kernel_initializer:
-            class_name: GlorotUniform
-            config:
-              seed: null
-          kernel_regularizer: null
-          name: dense
-          trainable: true
-          units: 200
-          use_bias: true
-      - class_name: Dense
-        config:
-          activation: relu
-          activity_regularizer: null
-          bias_constraint: null
-          bias_initializer:
-            class_name: Zeros
-            config: {}
-          bias_regularizer: null
-          dtype: float32
-          kernel_constraint: null
-          kernel_initializer:
-            class_name: GlorotUniform
-            config:
-              seed: null
-          kernel_regularizer: null
-          name: dense_1
-          trainable: true
-          units: 200
-          use_bias: true
-      - class_name: Dense
-        config:
-          activation: linear
-          activity_regularizer: null
-          bias_constraint: null
-          bias_initializer:
-            class_name: Zeros
-            config: {}
-          bias_regularizer: null
-          dtype: float32
-          kernel_constraint: null
-          kernel_initializer:
-            class_name: GlorotUniform
-            config:
-              seed: null
-          kernel_regularizer: null
-          name: dense_2
-          trainable: true
-          units: ${agent.state_size}
-          use_bias: true
-      name: sequential
-    keras_version: 2.3.0-tf
-
 
 buffer:
   size: 100000
@@ -258,7 +189,6 @@ experiment:
   n_episodes: 30000
   policy_every: 2
   critic_every: 1
-  forward_every: 1
   evaluate_every: 20
   record_episode_every: 1000000000
   save_every: 100

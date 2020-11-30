@@ -21,7 +21,6 @@ class Agent(object):
     def __init__(self,
             policy_learning_rate, policy_model_arch,
             critic_learning_rate, critic_model_arch,
-            forward_learning_rate, forward_model_arch,
             target_smoothing_stddev, tau, exploration_prob,
             state_size, action_size, goal_size, n_simulations, log_stddevs_init):
         #   POLICY
@@ -50,13 +49,6 @@ class Agent(object):
         self.target_critic_model_0 = model_copy(self.critic_model_0, fake_inp)
         self.target_critic_model_1 = model_copy(self.critic_model_1, fake_inp)
         self.critic_optimizer = keras.optimizers.Adam(self.critic_learning_rate)
-        #   FORWARD
-        self.forward_learning_rate = forward_learning_rate
-        self.forward_model = keras.models.model_from_yaml(
-            forward_model_arch.pretty(resolve=True),
-            custom_objects=custom_objects
-        )
-        self.forward_optimizer = keras.optimizers.Adam(self.forward_learning_rate)
         #   EXPLORATION NOISE
         self.n_simulations = n_simulations
         self.log_stddevs = tf.Variable(log_stddevs_init)
@@ -119,11 +111,6 @@ class Agent(object):
         return self.log_stddevs.numpy()
 
     @tf.function
-    def get_predictions(self, states, actions):
-        inps = tf.concat([states, actions], axis=-1)
-        return self.forward_model(inps)
-
-    @tf.function
     def get_return_estimates(self, states, actions, goals, target=False):
         inps = tf.concat([states, actions, tf.cast(goals, tf.float32)], axis=-1)
         if target:
@@ -155,17 +142,6 @@ class Agent(object):
         return loss
 
     @tf.function
-    def train_forward(self, states, actions, targets):
-        with tf.GradientTape() as tape:
-            predictions = self.get_predictions(states, actions)
-            losses = keras.losses.MSE(predictions, targets)
-            loss = tf.reduce_sum(tf.reduce_mean(losses, axis=-1))
-            vars = self.forward_model.variables
-            grads = tape.gradient(loss, vars)
-            self.forward_optimizer.apply_gradients(zip(grads, vars))
-        return loss
-
-    @tf.function
     def update_targets(self):
         model_target_pairs = [
             (self.critic_model_0, self.target_critic_model_0),
@@ -180,16 +156,13 @@ class Agent(object):
                 )
 
     @tf.function
-    def train(self, states, actions, goals, critic_target, forward_target,
-            policy=True, critic=True, forward=True):
+    def train(self, states, actions, goals, critic_target,
+            policy=True, critic=True):
         losses = {}
         if critic:
             critic_loss = self.train_critic(
                 states, actions, goals, critic_target)
             losses["critic"] = critic_loss
-        if forward:
-            forward_loss = self.train_forward(states, actions, forward_target)
-            losses["forward"] = forward_loss
         if policy:
             policy_loss = self.train_policy(states, goals)
             losses["policy"] = policy_loss

@@ -141,8 +141,6 @@ class Procedure(object):
             ("states", np.float32, self.state_size),
             ("noisy_actions", np.float32, self.action_size),
             ("goals", np.float32, self.goal_size),
-            ("forward_targets", np.float32, self.state_size),
-            ("predicted_next_states", np.float32, self.state_size),
             ("critic_targets", np.float32),
         ])
         self._train_data_buffer = np.zeros(
@@ -168,9 +166,7 @@ class Procedure(object):
             ("goals", np.float32, self.goal_size),
             ("current_goals", np.float32, self.goal_size),
             ("pure_actions", np.float32, self.action_size),
-            ("predicted_next_states", np.float32, self.state_size),
             ("return_estimates", np.float32),
-            ("forward_targets", np.float32, self.state_size),
             ("rewards", np.float32),
             ("metabolic_costs", np.float32),
             ("critic_targets", np.float32),
@@ -192,7 +188,6 @@ class Procedure(object):
         self.n_transition_gathered = 0
         self.n_policy_training = 0
         self.n_critic_training = 0
-        self.n_forward_training = 0
         self.n_global_training = 0
 
         # TENSORBOARD LOGGING
@@ -204,9 +199,6 @@ class Procedure(object):
         self.tb["training"]["critic"] = {}
         self.tb["training"]["critic"]["loss"] = Mean(
             "training/critic_loss", dtype=tf.float32)
-        self.tb["training"]["forward"] = {}
-        self.tb["training"]["forward"]["loss"] = Mean(
-            "training/forward_loss", dtype=tf.float32)
         self.tb["collection"] = {}
         self.tb["collection"]["exploration"] = {}
         self.tb["collection"]["evaluation"] = {}
@@ -234,10 +226,6 @@ class Procedure(object):
             "collection/exploration_one_away_sucess_rate", dtype=tf.float32)
         self.tb["collection"]["evaluation"]["one_away_sucess_rate"] = Mean(
             "collection/evaluation_one_away_sucess_rate", dtype=tf.float32)
-        self.tb["collection"]["exploration"]["forward_snr"] = Mean(
-            "collection/exploration_forward_snr_db", dtype=tf.float32)
-        self.tb["collection"]["evaluation"]["forward_snr"] = Mean(
-            "collection/evaluation_forward_snr_db", dtype=tf.float32)
         self.tb["collection"]["exploration"]["critic_snr"] = Mean(
             "collection/exploration_critic_snr_db", dtype=tf.float32)
         self.tb["collection"]["evaluation"]["critic_snr"] = Mean(
@@ -269,7 +257,7 @@ class Procedure(object):
                 metric.reset_states()
 
     def log_summaries(self, exploration=True, evaluation=True, critic=True,
-            policy=True, forward=True):
+            policy=True):
         if exploration:
             self.log_metrics(
                 "collection",
@@ -292,12 +280,6 @@ class Procedure(object):
             self.log_metrics(
                 "training",
                 "policy",
-                self.n_exploration_episodes
-            )
-        if forward:
-            self.log_metrics(
-                "training",
-                "forward",
                 self.n_exploration_episodes
             )
 
@@ -440,14 +422,9 @@ class Procedure(object):
         for iteration in range(self.episode_length):
             pure_actions, noisy_actions, noises = self.agent.get_actions(
                 states, goals)
-            predicted_next_states = self.agent.get_predictions(
-                states,
-                noisy_actions,
-            )
             self._train_data_buffer[:, iteration]["states"] = states
             self._train_data_buffer[:, iteration]["noisy_actions"] = noisy_actions
             self._train_data_buffer[:, iteration]["goals"] = goals
-            self._train_data_buffer[:, iteration]["predicted_next_states"] = predicted_next_states
             # not necessary for training but useful for logging:
             self._log_data_buffer[:, iteration]["noises"] = noises
             self._log_data_buffer[:, iteration]["current_goals"] = current_goals
@@ -457,9 +434,7 @@ class Procedure(object):
         goals = self._train_data_buffer["goals"]
         current_goals = self._log_data_buffer["current_goals"]
         # COMPUTE TARGETS
-        # forward target (valid until :-1)
         states = self._train_data_buffer["states"]
-        self._train_data_buffer[:, :-1]["forward_targets"] = states[:, 1:]
         # critic target (valid until :-1)
         distances = np.sum(np.abs(goals - current_goals), axis=-1)
         self._log_data_buffer[:, :-1]["rewards"] = \
@@ -543,8 +518,6 @@ class Procedure(object):
         self.accumulate_log_data(
             goals=self._train_data_buffer["goals"],
             current_goals=self._log_data_buffer["current_goals"],
-            predicted_next_states=self._train_data_buffer[:, :-1]["predicted_next_states"],
-            forward_targets=self._train_data_buffer[:, :-1]["forward_targets"],
             return_estimates=self._log_data_buffer[:, 1:-1]["target_return_estimates"],
             critic_targets=self._train_data_buffer[:, 1:-1]["critic_targets"],
             metabolic_costs=self._log_data_buffer["metabolic_costs"],
@@ -573,18 +546,12 @@ class Procedure(object):
         goals = self._evaluation_data_buffer["goals"]
         current_goals = self._evaluation_data_buffer["current_goals"]
         # BATCH PROCESSING
-        predicted_next_states = self.agent.get_predictions(
-            states, pure_actions)
         return_estimates = self.agent.get_return_estimates(
             states, pure_actions, goals)[..., 0]
-        self._evaluation_data_buffer["predicted_next_states"] = \
-            predicted_next_states
         self._evaluation_data_buffer["return_estimates"] = \
             return_estimates
         # COMPUTE TARGETS
-        # forward target (valid until :-1)
         states = self._evaluation_data_buffer["states"]
-        self._evaluation_data_buffer[:, :-1]["forward_targets"] = states[:, 1:]
         # critic target (valid until :-1)
         distances = np.sum(np.abs(goals - current_goals), axis=-1)
         self._evaluation_data_buffer[:, :-1]["rewards"] = \
@@ -610,8 +577,6 @@ class Procedure(object):
         self.accumulate_log_data(
             goals=self._evaluation_data_buffer["goals"],
             current_goals=self._evaluation_data_buffer["current_goals"],
-            predicted_next_states=self._evaluation_data_buffer[:, :-1]["predicted_next_states"],
-            forward_targets=self._evaluation_data_buffer[:, :-1]["forward_targets"],
             return_estimates=self._evaluation_data_buffer[:, :-1]["return_estimates"],
             critic_targets=self._evaluation_data_buffer[:, :-1]["max_step_returns"],
             metabolic_costs=self._evaluation_data_buffer["metabolic_costs"],
@@ -626,9 +591,8 @@ class Procedure(object):
         with open("./visualization_data/{}_critic.dat".format(self.episode_length), 'ab') as f:
             f.write(self._visualization_data_buffer.tobytes())
 
-    def accumulate_log_data(self, goals, current_goals, predicted_next_states,
-            forward_targets, return_estimates, critic_targets, metabolic_costs, time,
-            exploration, current_stddev=None):
+    def accumulate_log_data(self, goals, current_goals, return_estimates,
+            critic_targets, metabolic_costs, time, exploration, current_stddev=None):
         if exploration:
             tb = self.tb["collection"]["exploration"]
         else:
@@ -676,11 +640,6 @@ class Procedure(object):
             one_away_success_rate = 100 * n_one_away_success / n_one_away_ends
             tb["one_away_sucess_rate"](one_away_success_rate)
         #
-        signal = forward_targets
-        noise = forward_targets - predicted_next_states
-        forward_snr = get_snr_db(signal, noise)
-        tb["forward_snr"](np.mean(forward_snr))
-        #
         signal = critic_targets
         noise = critic_targets - return_estimates
         critic_snr = get_snr_db(signal, noise)
@@ -716,17 +675,15 @@ class Procedure(object):
                 )))
         return np.array(states), np.array(current_goals), np.array(metabolic_costs), np.array(frames)
 
-    def train(self, policy=True, critic=True, forward=True):
+    def train(self, policy=True, critic=True):
         data = self.buffer.sample(self.batch_size)
         losses = self.agent.train(
             data["states"],
             data["noisy_actions"],
             data["goals"],
             data["critic_targets"],
-            data["forward_targets"],
             policy=policy,
             critic=critic,
-            forward=forward,
         )
         tb = self.tb["training"]
         if policy:
@@ -735,22 +692,18 @@ class Procedure(object):
         if critic:
             self.n_critic_training += 1
             tb["critic"]["loss"](losses["critic"])
-        if forward:
-            self.n_forward_training += 1
-            tb["forward"]["loss"](losses["forward"])
         self.n_global_training += 1
         return losses
 
-    def collect_and_train(self, policy=True, critic=True, forward=True):
+    def collect_and_train(self, policy=True, critic=True):
         self.collect_data()
         while self.current_training_ratio < self.updates_per_sample:
-            self.train(policy=policy, critic=critic, forward=forward)
+            self.train(policy=policy, critic=critic)
 
-    def collect_train_and_log(self, policy=True, critic=True, forward=True,
-            evaluation=False):
-        self.collect_and_train(policy=policy, critic=critic, forward=forward)
+    def collect_train_and_log(self, policy=True, critic=True, evaluation=False):
+        self.collect_and_train(policy=policy, critic=critic)
         if evaluation:
             self.evaluate()
         if self.n_global_training % self.log_freq == 0:
             self.log_summaries(exploration=True, evaluation=evaluation,
-                policy=policy, critic=critic, forward=forward)
+                policy=policy, critic=critic)
