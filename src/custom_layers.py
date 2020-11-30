@@ -22,16 +22,11 @@ class LinspaceInitializer(keras.initializers.Initializer):
 class NormalNoise(keras.layers.Layer):
     def __init__(self, n_simulations, min_log_stddev, max_log_stddev, clip_min=None, clip_max=None):
         super().__init__(self)
-        self._n_simulations = n_simulations
-        self._min_log_stddev = min_log_stddev
-        self._max_log_stddev = max_log_stddev
+        self._n_simulations = int(n_simulations) # solve omegaconf bug with nested interpolation
+        self._min_log_stddev = float(min_log_stddev) # solve omegaconf bug with nested interpolation
+        self._max_log_stddev = float(max_log_stddev) # solve omegaconf bug with nested interpolation
         self._clip_min = clip_min
         self._clip_max = clip_max
-        self._on = self.add_weight(
-            "on",
-            dtype=tf.bool,
-            trainable=False,
-        )
         self._explore = self.add_weight(
             "explore",
             shape=self._n_simulations,
@@ -46,20 +41,31 @@ class NormalNoise(keras.layers.Layer):
             trainable=False,
         )
 
-    def call(self, inputs):
-        if self._on:
-            noise = tf.random.normal(shape=tf.shape(inputs)) * tf.exp(self.log_stddevs)[:, tf.newaxis]
+    def build(self, input_shape):
+        self.last_noises = self.add_weight(
+            "last_noises",
+            shape=[self._n_simulations, input_shape[-1]],
+            dtype=tf.float32,
+            initializer=keras.initializers.Zeros,
+            trainable=False,
+        )
+
+    def call(self, inputs, training=True):
+        if not training:
+            return inputs
+        else:
+            stddev = tf.exp(self.log_stddevs)[:, tf.newaxis]
+            noise = tf.random.normal(shape=tf.shape(inputs)) * stddev
             noise = tf.where(self._explore[:, tf.newaxis], noise, tf.zeros_like(noise))
             before_clipping = inputs + noise
             if self._clip_min is not None and self._clip_max is not None:
-                return tf.clip_by_value(before_clipping, self._clip_min, self._clip_max)
+                after_clipping = tf.clip_by_value(before_clipping, self._clip_min, self._clip_max)
+                noise = after_clipping - inputs
+                self.last_noises.assign(noise)
+                return after_clipping
             else:
+                self.last_noises.assign(noise)
                 return before_clipping
-        else:
-            return inputs
-
-    def set_on(self, new):
-        self._on.assign(new)
 
     def set_explore(self, new):
         self._explore.assign(new)
@@ -99,12 +105,13 @@ if __name__ == '__main__':
     clip_max = 1
 
     a = keras.models.Sequential([NormalNoise(n_simulations, min_log_stddev, max_log_stddev, clip_min=clip_min, clip_max=clip_max)])
-    a.layers[0].set_on(True)
     a.layers[0].set_explore(tf.ones(40, dtype=tf.bool))
     print(a(tf.zeros(shape=[40, 2])))
-    a.layers[0].set_on(False)
-    print(a(tf.zeros(shape=[140, 2])))
+    print(a(tf.zeros(shape=[140, 2]), training=False))
 
     yaml = a.to_yaml()
     print(yaml)
     b = keras.models.model_from_yaml(yaml, custom_objects=custom_objects)
+
+
+    print(a.variables)

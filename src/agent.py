@@ -22,7 +22,7 @@ class Agent(object):
             policy_learning_rate, policy_model_arch,
             critic_learning_rate, critic_model_arch,
             target_smoothing_stddev, tau, exploration_prob,
-            state_size, action_size, goal_size, n_simulations, log_stddevs_init):
+            state_size, action_size, goal_size, n_simulations):
         #   POLICY
         self.policy_learning_rate = policy_learning_rate
         self.policy_model = keras.models.model_from_yaml(
@@ -30,10 +30,11 @@ class Agent(object):
             custom_objects=custom_objects
         )
         fake_inp = np.zeros(
-            shape=(1, state_size + goal_size),
+            shape=(n_simulations, state_size + goal_size),
             dtype=np.float32
         )
         self.target_policy_model = model_copy(self.policy_model, fake_inp)
+        self.noise_layer = self.policy_model.layers[-1]
         self.policy_optimizer = keras.optimizers.Adam(self.policy_learning_rate)
         #   CRITIC
         self.critic_learning_rate = critic_learning_rate
@@ -51,7 +52,6 @@ class Agent(object):
         self.critic_optimizer = keras.optimizers.Adam(self.critic_learning_rate)
         #   EXPLORATION NOISE
         self.n_simulations = n_simulations
-        self.log_stddevs = tf.Variable(log_stddevs_init)
         #   TD3
         self.target_smoothing_stddev = target_smoothing_stddev
         self.tau = tau
@@ -72,43 +72,35 @@ class Agent(object):
         self.target_critic_model_1.load_weights(path + "/target_critic_model_1")
 
     @tf.function
-    def get_actions(self, states, goals, target=False, training=False):
+    def get_actions(self, states, goals, target=False, pure_only=False):
         inps = tf.concat([states, tf.cast(goals, tf.float32)], axis=-1)
         if target:
             stddev = self.target_smoothing_stddev
-            pure_actions = self.target_policy_model(inps)
+            pure_actions = self.target_policy_model(inps, training=False)
             noises = tf.random.truncated_normal(
                 shape=tf.shape(pure_actions),
                 stddev=stddev,
             )
+            noisy_actions = tf.clip_by_value(
+                pure_actions + noises,
+                clip_value_min=-1,
+                clip_value_max=1
+            )
+            return pure_actions, noisy_actions, noises
+        elif pure_only:
+            return self.policy_model(inps, training=False)
         else:
-            stddev = tf.exp(self.log_stddevs)      # [N_SIM]
-            pure_actions = self.policy_model(inps) # [N_SIM, 7]
-            if training:
-                return pure_actions
-            filter_shape = tf.shape(pure_actions)[:-1]
-            noise_filter = tf.where(
-                condition=tf.random.uniform(shape=filter_shape) < self.exploration_prob,
-                x=tf.ones(shape=filter_shape),
-                y=tf.zeros(shape=filter_shape),
-            )  # [N_SIM]
-            noises = tf.random.truncated_normal(
-                shape=tf.shape(pure_actions),
-                stddev=1.0,
-            ) * stddev[..., tf.newaxis] * noise_filter[..., tf.newaxis]
-        noisy_actions = tf.clip_by_value(
-            pure_actions + noises,
-            clip_value_min=-1,
-            clip_value_max=1
-        )
-        noises = noisy_actions - pure_actions
-        return pure_actions, noisy_actions, noises
+            self.noise_layer.set_explore(tf.random.uniform(shape=(self.n_simulations,)) < self.exploration_prob)
+            noisy_actions = self.policy_model(inps, training=True)
+            noises = self.noise_layer.last_noises
+            pure_actions = noisy_actions - noises
+            return pure_actions, noisy_actions, noises
 
     def set_log_stddevs(self, values):
-        self.log_stddevs.assign(values)
+        self.noise_layer.set_log_stddevs(values)
 
     def get_log_stddevs(self):
-        return self.log_stddevs.numpy()
+        return self.noise_layer.log_stddevs.numpy()
 
     @tf.function
     def get_return_estimates(self, states, actions, goals, target=False):
@@ -133,10 +125,10 @@ class Agent(object):
     @tf.function
     def train_policy(self, states, goals):
         with tf.GradientTape() as tape:
-            actions = self.get_actions(states, goals, training=True)
+            actions = self.get_actions(states, goals, pure_only=True)
             estimates = self.get_return_estimates(states, actions, goals)
             loss = - tf.reduce_sum(estimates)
-            vars = self.policy_model.variables
+            vars = self.policy_model.trainable_variables
             grads = tape.gradient(loss, vars)
             self.policy_optimizer.apply_gradients(zip(grads, vars))
         return loss
@@ -149,7 +141,7 @@ class Agent(object):
             (self.policy_model, self.target_policy_model),
         ]
         for model, target in model_target_pairs:
-            for model_var, target_var in zip(model.variables, target.variables):
+            for model_var, target_var in zip(model.trainable_variables, target.trainable_variables):
                 target_var.assign(
                     (1 - self.tau) * target_var +
                     self.tau * model_var

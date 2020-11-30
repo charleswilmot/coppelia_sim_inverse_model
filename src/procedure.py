@@ -104,12 +104,7 @@ class Procedure(object):
             ("movement_span", procedure_conf.movement_span_in_sec),
         ])
         #   OBJECTS
-        log_stddevs_init = np.linspace(
-            np.log(procedure_conf.std_autotuner.min_stddev),
-            np.log(procedure_conf.std_autotuner.max_stddev),
-            self.n_simulations,
-        ).astype(np.float32)
-        self.agent = Agent(**agent_conf, log_stddevs_init=log_stddevs_init)
+        self.agent = Agent(**agent_conf)
         self.buffer = Buffer(**buffer_conf)
         #   SIMULATION POOL
         guis = list(simulation_conf.guis)
