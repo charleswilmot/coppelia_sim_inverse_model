@@ -85,7 +85,7 @@ def get_partition_reservation():
     print("no free space")
     # OPTION 3
     print("checking OPTION 3 ... ", end="")
-    if node_list_availability(["jetski"]):
+    if node_list_availability(["jetski", "speedboat"]):
         print("free space available, sending job")
         return "sleuths", "triesch-shared"
     print("no free space")

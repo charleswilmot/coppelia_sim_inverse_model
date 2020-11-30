@@ -22,8 +22,8 @@ class Agent(object):
             policy_learning_rate, policy_model_arch,
             critic_learning_rate, critic_model_arch,
             forward_learning_rate, forward_model_arch,
-            target_smoothing_stddev, tau,
-            state_size, action_size, goal_size, n_simulations):
+            target_smoothing_stddev, tau, exploration_prob,
+            state_size, action_size, goal_size, n_simulations, log_stddevs_init):
         #   POLICY
         self.policy_learning_rate = policy_learning_rate
         self.policy_model = keras.models.model_from_yaml(
@@ -59,10 +59,11 @@ class Agent(object):
         self.forward_optimizer = keras.optimizers.Adam(self.forward_learning_rate)
         #   EXPLORATION NOISE
         self.n_simulations = n_simulations
-        self.log_stddevs = tf.Variable(tf.zeros(shape=self.n_simulations, dtype=tf.float32))
+        self.log_stddevs = tf.Variable(log_stddevs_init)
         #   TD3
         self.target_smoothing_stddev = target_smoothing_stddev
         self.tau = tau
+        self.exploration_prob = exploration_prob
 
     def save_weights(self, path):
         self.policy_model.save_weights(path + "/policy_model")
@@ -79,32 +80,37 @@ class Agent(object):
         self.target_critic_model_1.load_weights(path + "/target_critic_model_1")
 
     @tf.function
-    def get_actions(self, states, goals, exploration=False, target=False):
+    def get_actions(self, states, goals, target=False, training=False):
         inps = tf.concat([states, tf.cast(goals, tf.float32)], axis=-1)
-        if target or exploration:
-            if target:
-                stddev = self.target_smoothing_stddev
-                pure_actions = self.target_policy_model(inps)
-                noises = tf.random.truncated_normal(
-                    shape=tf.shape(pure_actions),
-                    stddev=stddev,
-                )
-            else:
-                stddev = tf.exp(self.log_stddevs)      # [N_SIM]
-                pure_actions = self.policy_model(inps) # [N_SIM, 7]
-                noises = tf.random.truncated_normal(
-                    shape=tf.shape(pure_actions),
-                    stddev=1.0,
-                ) * stddev[:, tf.newaxis]
-            noisy_actions = tf.clip_by_value(
-                pure_actions + noises,
-                clip_value_min=-1,
-                clip_value_max=1
+        if target:
+            stddev = self.target_smoothing_stddev
+            pure_actions = self.target_policy_model(inps)
+            noises = tf.random.truncated_normal(
+                shape=tf.shape(pure_actions),
+                stddev=stddev,
             )
-            noises = noisy_actions - pure_actions
-            return pure_actions, noisy_actions, noises
         else:
-            return self.policy_model(inps)
+            stddev = tf.exp(self.log_stddevs)      # [N_SIM]
+            pure_actions = self.policy_model(inps) # [N_SIM, 7]
+            if training:
+                return pure_actions
+            filter_shape = tf.shape(pure_actions)[:-1]
+            noise_filter = tf.where(
+                condition=tf.random.uniform(shape=filter_shape) < self.exploration_prob,
+                x=tf.ones(shape=filter_shape),
+                y=tf.zeros(shape=filter_shape),
+            )  # [N_SIM]
+            noises = tf.random.truncated_normal(
+                shape=tf.shape(pure_actions),
+                stddev=1.0,
+            ) * stddev[..., tf.newaxis] * noise_filter[..., tf.newaxis]
+        noisy_actions = tf.clip_by_value(
+            pure_actions + noises,
+            clip_value_min=-1,
+            clip_value_max=1
+        )
+        noises = noisy_actions - pure_actions
+        return pure_actions, noisy_actions, noises
 
     def set_log_stddevs(self, values):
         self.log_stddevs.assign(values)
@@ -140,7 +146,7 @@ class Agent(object):
     @tf.function
     def train_policy(self, states, goals):
         with tf.GradientTape() as tape:
-            actions = self.get_actions(states, goals, exploration=False)
+            actions = self.get_actions(states, goals, training=True)
             estimates = self.get_return_estimates(states, actions, goals)
             loss = - tf.reduce_sum(estimates)
             vars = self.policy_model.variables

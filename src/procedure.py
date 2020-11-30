@@ -29,6 +29,30 @@ def get_snr_db(signal, noise, axis=1):
     return 20 * (rms_signal_db - rms_noise_db)
 
 
+def compute_critic_target(rewards, critic_estimates, noises, discount_factor, noise_magnitude_limit, one_step=False):
+    if noise_magnitude_limit == 0:
+        lambdo = 1.0
+    else:
+        lambdo = 1 / noise_magnitude_limit
+    shape = np.copy(rewards.shape)
+    shape[-1] -= 1
+    targets = np.zeros(shape=shape, dtype=np.float32)
+    current_targets = critic_estimates[:, -1]
+    for i in np.arange(shape[-1] - 1, -1, -1):
+        if one_step or noise_magnitude_limit == 0:
+            alpha = 1.0
+        else:
+            alpha = 1 - np.exp(- lambdo *
+                np.sqrt(np.sum(noises[:, i] ** 2, axis=-1))
+            )
+        targets[:, i] = rewards[:, i] + discount_factor * (
+            alpha * critic_estimates[:, i + 1] +
+            (1 - alpha) * current_targets
+        )
+        current_targets = targets[:, i]
+    return targets
+
+
 class Procedure(object):
     def __init__(self, agent_conf, buffer_conf, simulation_conf, procedure_conf):
         #   PROCEDURE CONF
@@ -48,11 +72,14 @@ class Procedure(object):
         ]
         self.her_max_replays = procedure_conf.her.max_replays
         self.discount_factor = procedure_conf.discount_factor
+        self.noise_magnitude_limit = procedure_conf.noise_magnitude_limit
+        self.one_step = procedure_conf.one_step
         self.metabolic_cost_scale = procedure_conf.metabolic_cost_scale
         self.std_autotuner = STDAutoTuner(
             procedure_conf.std_autotuner.length,
             self.n_simulations,
-            procedure_conf.std_autotuner.autotune_scale,
+            procedure_conf.std_autotuner.min_stddev,
+            procedure_conf.std_autotuner.max_stddev,
             importance_ratio=procedure_conf.std_autotuner.importance_ratio
         )
         self.std_autotuner.init(
@@ -60,6 +87,8 @@ class Procedure(object):
             procedure_conf.std_autotuner.reward_init,
         )
         self.std_autotuner_filter_size = procedure_conf.std_autotuner.filter_size
+        self.std_importance = procedure_conf.std_autotuner.std_importance
+        self.std_temperature = procedure_conf.std_autotuner.temperature
         self.std_autotuner_plot_path = './std_autotuner/'
         #    HPARAMS
         self._hparams = OrderedDict([
@@ -75,7 +104,12 @@ class Procedure(object):
             ("movement_span", procedure_conf.movement_span_in_sec),
         ])
         #   OBJECTS
-        self.agent = Agent(**agent_conf)
+        log_stddevs_init = np.linspace(
+            np.log(procedure_conf.std_autotuner.min_stddev),
+            np.log(procedure_conf.std_autotuner.max_stddev),
+            self.n_simulations,
+        ).astype(np.float32)
+        self.agent = Agent(**agent_conf, log_stddevs_init=log_stddevs_init)
         self.buffer = Buffer(**buffer_conf)
         #   SIMULATION POOL
         guis = list(simulation_conf.guis)
@@ -119,6 +153,7 @@ class Procedure(object):
         self._log_data_type = np.dtype([
             ("current_goals", np.float32, self.goal_size),
             ("pure_actions", np.float32, self.action_size),
+            ("noises", np.float32, self.action_size),
             ("rewards", np.float32),
             ("metabolic_costs", np.float32),
             ("target_return_estimates", np.float32),
@@ -333,13 +368,12 @@ class Procedure(object):
                     for i in range(24):
                         writer.append_data(frame)
                 for iteration in range(self.episode_length):
+                    pure_actions, noisy_actions, noises = self.agent.get_actions(
+                        states, goals)
                     if exploration:
-                        _, actions, _ = self.agent.get_actions(
-                            states, goals,
-                            exploration=True)
+                        actions = noisy_actions
                     else:
-                        actions = self.agent.get_actions(
-                            states, goals, exploration=False)
+                        actions = pure_actions
                     if record:
                         states, current_goals, metabolic_costs, frames = \
                             self.apply_action_get_frames(actions, [cam_id])
@@ -381,8 +415,7 @@ class Procedure(object):
                     for i in range(24):
                         writer.append_data(frame)
                 for iteration in range(self.episode_length):
-                    actions = self.agent.get_actions(
-                        states, goals, exploration=False)
+                    actions, _, __ = self.agent.get_actions(states, goals)
                     if record:
                         states, current_goals, metabolic_costs, frames_per_sim = \
                             self.apply_action_get_frames(actions, cam_ids)
@@ -406,7 +439,7 @@ class Procedure(object):
         time_start = time.time()
         for iteration in range(self.episode_length):
             pure_actions, noisy_actions, noises = self.agent.get_actions(
-                states, goals, exploration=True)
+                states, goals)
             predicted_next_states = self.agent.get_predictions(
                 states,
                 noisy_actions,
@@ -416,6 +449,7 @@ class Procedure(object):
             self._train_data_buffer[:, iteration]["goals"] = goals
             self._train_data_buffer[:, iteration]["predicted_next_states"] = predicted_next_states
             # not necessary for training but useful for logging:
+            self._log_data_buffer[:, iteration]["noises"] = noises
             self._log_data_buffer[:, iteration]["current_goals"] = current_goals
             self._log_data_buffer[:, iteration]["pure_actions"] = pure_actions
             states, current_goals, metabolic_costs = self.apply_action(noisy_actions)
@@ -432,29 +466,33 @@ class Procedure(object):
             distances[:, :-1] - distances[:, 1:] - \
             self.metabolic_cost_scale * self._log_data_buffer[:, :-1]["metabolic_costs"]
         pure_target_actions, noisy_target_actions, noise = self.agent.get_actions(
-            states,
-            goals,
-            target=True,
-        )
+            states, goals, target=True)
         self._log_data_buffer["target_return_estimates"] = self.agent.get_return_estimates(
                 states,
                 noisy_target_actions,
                 goals,
                 target=True,
         )[..., 0]
-        self._train_data_buffer[:, :-1]["critic_targets"] = \
-            self._log_data_buffer[:, :-1]["rewards"] + \
-            self.discount_factor * \
-            self._log_data_buffer[:, 1:]["target_return_estimates"]
+        self._train_data_buffer[:, :-1]["critic_targets"] = compute_critic_target(
+            rewards=self._log_data_buffer["rewards"],  # last reward is not used
+            critic_estimates=self._log_data_buffer["target_return_estimates"], # first estimate is not used
+            noises=self._log_data_buffer["noises"],  # last noise is not used
+            discount_factor=self.discount_factor,
+            noise_magnitude_limit=self.noise_magnitude_limit,
+            one_step=self.one_step,
+        )
         log_stddevs = self.agent.get_log_stddevs()
-        rewards = np.sum(self._log_data_buffer["rewards"], axis=-1)
+        # rewards = np.sum(self._log_data_buffer["rewards"], axis=-1)
+        rewards = np.sum(np.abs(self._log_data_buffer[:, :-1]["target_return_estimates"] - self._train_data_buffer[:, :-1]["critic_targets"]), axis=-1)
         self.std_autotuner.register_rewards(log_stddevs, rewards)
-        log_stddevs = self.std_autotuner.get_log_stddevs(self.std_autotuner_filter_size)
+        log_stddevs = self.std_autotuner.get_log_stddevs(self.std_autotuner_filter_size, self.std_importance, self.std_temperature)
         stddev = np.exp(log_stddevs[len(log_stddevs) // 2])
         self.agent.set_log_stddevs(log_stddevs)
         self.std_autotuner.save_plot(
             self.std_autotuner_plot_path + '{:07d}.png'.format(self.n_exploration_episodes),
-            self.std_autotuner_filter_size
+            self.std_autotuner_filter_size,
+            self.std_importance,
+            log_stddevs,
         )
         # HINDSIGHT EXPERIENCE
         for_hindsight = []
@@ -471,6 +509,8 @@ class Procedure(object):
                 her_goals[-self.her_max_replays:]
                 for her_goals in her_goals_per_sim
             ] # keep up to 'her_max_replays' of those goals (from the last)
+            rewards_buffer = np.zeros(shape=self.episode_length, dtype=np.float32)
+            target_return_estimates_buffer = np.zeros(shape=self.episode_length, dtype=np.float32)
             for simulation, her_goals in enumerate(her_goals_per_sim):
                 metabolic_costs = self.metabolic_cost_scale * self._log_data_buffer[simulation, :-1]["metabolic_costs"]
                 for her_goal in her_goals: # for each simulation, for each fake (HER) goal
@@ -480,19 +520,18 @@ class Procedure(object):
                     current_goals = self._log_data_buffer[simulation]["current_goals"]
                     states = her_data["states"]
                     distances = np.sum(np.abs(goals - current_goals), axis=-1)
-                    rewards = distances[:-1] - distances[1:] - metabolic_costs
-                    pure_target_actions, noisy_target_actions, noise = self.agent.get_actions(
-                        states[1:],
-                        goals[1:],
-                        target=True,
+                    rewards_buffer[:-1] = distances[:-1] - distances[1:] - metabolic_costs
+                    pure_target_actions, noisy_target_actions, noises = self.agent.get_actions(
+                        states, goals, target=True)
+                    noises_buffer = her_data["noisy_actions"] - pure_target_actions
+                    her_data[:-1]["critic_targets"] = compute_critic_target(
+                        rewards=rewards_buffer[np.newaxis],  # last reward is not used
+                        critic_estimates=target_return_estimates_buffer[np.newaxis], # first estimate is not used
+                        noises=noises_buffer[np.newaxis],  # last noise is not used
+                        discount_factor=self.discount_factor,
+                        noise_magnitude_limit=self.noise_magnitude_limit,
+                        one_step=self.one_step,
                     )
-                    her_data[:-1]["critic_targets"] = \
-                        rewards + self.discount_factor * self.agent.get_return_estimates(
-                            states[1:],
-                            noisy_target_actions,
-                            goals[1:],
-                            target=True,
-                        )[..., 0]
                     for_hindsight.append(her_data[:-1])
         regular_data = self._train_data_buffer[:, :-1].flatten()
         buffer_data = np.concatenate(for_hindsight + [regular_data], axis=0)
@@ -521,8 +560,8 @@ class Procedure(object):
         states, current_goals = self.reset_simulations(register_states, goals)
         time_start = time.time()
         for iteration in range(self.episode_length):
-            pure_actions = self.agent.get_actions(
-                states, goals, exploration=False)
+            pure_actions, noisy_actions, noise = self.agent.get_actions(
+                states, goals)
             self._evaluation_data_buffer[:, iteration]["states"] = states
             self._evaluation_data_buffer[:, iteration]["goals"] = goals
             self._evaluation_data_buffer[:, iteration]["current_goals"] = current_goals
@@ -551,10 +590,14 @@ class Procedure(object):
         self._evaluation_data_buffer[:, :-1]["rewards"] = \
             distances[:, :-1] - distances[:, 1:] - \
             self.metabolic_cost_scale * self._evaluation_data_buffer[:, :-1]["metabolic_costs"]
-        self._evaluation_data_buffer[:, :-1]["critic_targets"] = \
-            self._evaluation_data_buffer[:, :-1]["rewards"] + \
-            self.discount_factor * \
-            self._evaluation_data_buffer[:, 1:]["return_estimates"]
+        self._evaluation_data_buffer[:, :-1]["critic_targets"] = compute_critic_target(
+            rewards=self._evaluation_data_buffer["rewards"],  # last reward is not used
+            critic_estimates=self._evaluation_data_buffer["return_estimates"], # first estimate is not used
+            noises=np.zeros_like(self._evaluation_data_buffer["rewards"]),  # last noise is not used
+            discount_factor=self.discount_factor,
+            noise_magnitude_limit=self.noise_magnitude_limit,
+            one_step=self.one_step,
+        )
         prev = self._evaluation_data_buffer[:, -1]["return_estimates"]
         self._evaluation_data_buffer[:, -1]["max_step_returns"] = prev
         for it in np.arange(self.episode_length - 2, -1, -1):
