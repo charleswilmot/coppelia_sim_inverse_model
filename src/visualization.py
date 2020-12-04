@@ -10,7 +10,7 @@ plt.ion()
 
 visualization_data_type = np.dtype([
     ("rewards", np.float32),
-    ("return_estimates", np.float32),
+    ("target_return_estimates", np.float32),
     ("critic_targets", np.float32),
     ("max_step_returns", np.float32),
 ])
@@ -47,12 +47,12 @@ class Visualization(object):
                 y = data["rewards"][x]
                 lines["rewards"], = ax.plot(x, y, 'bo', label=label)
             ###
-            if lines["return_estimates"]:
-                lines["return_estimates"].set_ydata(data["return_estimates"])
+            if lines["target_return_estimates"]:
+                lines["target_return_estimates"].set_ydata(data["target_return_estimates"])
             else:
                 label = None if i else 'return_estimates'
-                lines["return_estimates"], = ax.plot(
-                    data["return_estimates"],
+                lines["target_return_estimates"], = ax.plot(
+                    data["target_return_estimates"],
                     color='#ff0000',
                     label=label,
                 )

@@ -396,17 +396,15 @@ class SimulationConsumer(SimulationConsumerAbstract):
     def get_movement_velocities(self, actions, mode='minimalist', span=10):
         if mode == 'minimalist':
             ramp = 0.5 - 0.5 * np.cos(np.linspace(0, 2 * np.pi, span))
-            velocities = \
-                actions[np.newaxis] * \
-                ramp[:, np.newaxis] * \
-                self._upper_velocity_limits[np.newaxis]
+            velocities = actions * ramp[:, np.newaxis] * self._upper_velocity_limits[np.newaxis]
+            velocities = velocities[np.newaxis] # shape [1, span, 7]
         elif mode == "cubic_hermite":
             shape_factor = 0.2
             x = [0, 0.5, 1]
-            actions_speeds = actions[:2 * self._n_joints]
+            actions_speeds = actions[:, :2 * self._n_joints]
             actions_speeds = actions_speeds.reshape(
                 (2, self._n_joints))
-            actions_accelerations = actions[2 * self._n_joints:]
+            actions_accelerations = actions[:, 2 * self._n_joints:]
             actions_accelerations = actions_accelerations.reshape(
                 (2, self._n_joints))
             speeds = np.vstack([self._previous_hermite_speeds, actions_speeds])
@@ -416,43 +414,52 @@ class SimulationConsumer(SimulationConsumerAbstract):
             eval = np.linspace(0, 1, span)
             poly = CubicHermiteSpline(x, speeds, accelerations)
             velocities = poly(eval) * self._upper_velocity_limits[np.newaxis]
+            velocities = velocities[np.newaxis] # shape [1, span, 7]
             self._previous_hermite_speeds = speeds[-1]
             self._previous_hermite_accelerations = accelerations[-1]
         elif mode == "full_raw":
-            velocities = actions.reshape((span, self._n_joints)) * self._upper_velocity_limits[np.newaxis]
+            velocities = actions * self._upper_velocity_limits[np.newaxis]
+            velocities = velocities[:, np.newaxis] # shape [span, 1, 7]
         elif mode == "one_raw":
-            assert(len(actions) == self._n_joints)
-            velocities = actions[np.newaxis] * self._upper_velocity_limits[np.newaxis]
+            velocities = actions * self._upper_velocity_limits[np.newaxis]
+            velocities = velocities[np.newaxis] # shape [1, 1, 7]
         else:
             raise ValueError("Unrecognized movement mode ({})".format(mode))
         return velocities
 
     @communicate_return_value
     def apply_movement(self, actions, mode='minimalist', span=10):
-        velocities = self.get_movement_velocities(actions, mode=mode, span=span)
+        velocities = self.get_movement_velocities(actions, mode=mode, span=span) # shape [n_states_to_be_returned, mini_sequence_length, n_joints]
         normalized_velocities = velocities / self._upper_velocity_limits[np.newaxis]
-        metabolic_cost = np.sum(normalized_velocities ** 2)
-        for velocity in velocities:
-            self.set_joint_target_velocities(velocity)
-            self.step_sim()
-        state, stateful_objects_states = self.get_data()
-        return state, stateful_objects_states, metabolic_cost
+        metabolic_costs = np.sum(normalized_velocities ** 2, axis=(1, 2)) # shape [n_states_to_be_returned]
+        states_sequence = []
+        stateful_objects_states_sequence = []
+        for mini_sequence in velocities:
+            state, stateful_objects_state = self.get_data()
+            states_sequence.append(state)
+            stateful_objects_states_sequence.append(stateful_objects_state)
+            for velocity in mini_sequence:
+                self.set_joint_target_velocities(velocity)
+                self.step_sim()
+        return np.vstack(states_sequence), np.vstack(stateful_objects_states_sequence), metabolic_costs
 
     @communicate_return_value
     def apply_movement_get_frames(self, actions, cam_id, mode='minimalist', span=10):
         velocities = self.get_movement_velocities(actions, mode=mode, span=span)
-        frames = [self.get_frame(cam_id)]
-        for_std = np.array([91, 94, 43, 67, 12, 8.7, 2.3])
-        per_joint_metabolic_cost = np.zeros(self._n_joints, dtype=np.float32)
-        for velocity in velocities:
-            self.set_joint_target_velocities(velocity)
-            self.step_sim()
-            frames.append(self.get_frame(cam_id))
-            per_joint_metabolic_cost += np.abs(self.get_joint_forces())
-        per_joint_metabolic_cost /= for_std * len(velocities)
-        metabolic_cost = np.mean(per_joint_metabolic_cost)
-        state, stateful_objects_states = self.get_data()
-        return state, stateful_objects_states, metabolic_cost, frames
+        normalized_velocities = velocities / self._upper_velocity_limits[np.newaxis]
+        metabolic_costs = np.sum(normalized_velocities ** 2, axis=(1, 2)) # shape [n_states_to_be_returned]
+        states_sequence = []
+        stateful_objects_states_sequence = []
+        frames = []
+        for mini_sequence in velocities:
+            state, stateful_objects_state = self.get_data()
+            states_sequence.append(state)
+            stateful_objects_states_sequence.append(stateful_objects_state)
+            for velocity in mini_sequence:
+                frames.append(self.get_frame(cam_id))
+                self.set_joint_target_velocities(velocity)
+                self.step_sim()
+        return np.vstack(states_sequence), np.vstack(stateful_objects_states_sequence), metabolic_costs, np.vstack(frames)
 
     def set_control_loop_enabled(self, bool):
         for arm in self._arm_list:

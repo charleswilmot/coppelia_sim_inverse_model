@@ -19,8 +19,9 @@ class Buffer(object):
     def integrate(self, data):
         if self.dtype is None: # must create buffer and dtype
             self.dtype = data.dtype
-            self.buffer = np.zeros(self.size, dtype=self.dtype)
-        data = data.flatten()
+            shape = np.copy(data.shape)
+            shape[0] = self.size
+            self.buffer = np.zeros(shape=shape, dtype=self.dtype)
         n = data.shape[0]
         indices = self.get_insertion_indices(n)
         if self.current_last < self.size:
