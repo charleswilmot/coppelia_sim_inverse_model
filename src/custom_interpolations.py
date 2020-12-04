@@ -19,4 +19,5 @@ def get_policy_output_size(movement_mode, simulation_timestep, movement_span_in_
 
 
 OmegaConf.register_resolver("get_policy_output_size", get_policy_output_size)
+OmegaConf.register_resolver("slash_to_dot", lambda x: x.replace('/', '.'))
 OmegaConf.register_resolver("log", lambda x: np.log(float(x)))

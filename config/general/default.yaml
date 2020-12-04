@@ -9,9 +9,9 @@ experiment:
   evaluate_every: 20
   record_episode_every: 1000000000
   save_every: 100
-  final_recording: False
+  final_recording: True
   dump_buffers_at:
-    - 100
+    - 100000
 
 defaults:
   - agent: default
@@ -25,10 +25,10 @@ defaults:
 
 hydra:
   run:
-    dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}_${hydra.job.override_dirname}
+    dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}_${slash_to_dot:${hydra.job.override_dirname}}
   sweep:
     dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}/
-    subdir: job${hydra.job.num}_${hydra.job.override_dirname}
+    subdir: job${hydra.job.num}_${slash_to_dot:${hydra.job.override_dirname}}
   job:
     config:
       # configuration for the ${hydra.job.override_dirname} runtime variable
