@@ -6,7 +6,7 @@ import os
 import custom_interpolations
 
 
-@hydra.main(config_path="../config/cluster/cluster.yaml", strict=True)
+@hydra.main(config_path="../config/cluster", config_name="cluster.yaml")
 def remote_record(cfg):
     with open(cfg.rundir + '/cfg.json', 'r') as f:
         other_cfg_json = json.load(f)

@@ -1,5 +1,5 @@
 path: ???
-n_episodes: 10
+n_episodes: 1
 gui: False
 record: True
 exploration: False

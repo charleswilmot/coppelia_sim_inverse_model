@@ -22,11 +22,11 @@ def replay(cfg):
     buffer_conf = experiment_cfg.buffer
     simulation_conf = experiment_cfg.simulation
     procedure_conf = experiment_cfg.procedure
-    simulation_conf.n = cfg.n_overlays if cfg.overlay else 1
+    # simulation_conf.n = cfg.n_overlays if cfg.overlay else 1
     if cfg.gui:
         simulation_conf.guis = [0]
 
-    video_name = 'replay_exploration.mp4' if cfg.exploration else 'replay.mp4'
+    video_name = 'replay_exploration' if cfg.exploration else 'replay'
     relative_checkpoint_path = "../checkpoints/" + Path(cfg.path).stem
     with Procedure(agent_conf, buffer_conf, simulation_conf,
             procedure_conf) as procedure:

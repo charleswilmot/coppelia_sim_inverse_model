@@ -81,7 +81,7 @@ def get_partition_reservation():
     print("no free space")
     # OPTION 3
     print("checking OPTION 3 ... ", end="")
-    if node_list_availability(["jetski"]):
+    if node_list_availability(["jetski", "speedboat"]):
         print("free space available, sending job")
         return "sleuths", "triesch-shared"
     print("no free space")
@@ -146,18 +146,19 @@ def ssh_command(cmd):
     client = SSHClient()
     client.set_missing_host_key_policy(AutoAddPolicy())
     client.load_system_host_keys()
+    PASSWORD = getpass("Please enter password\n")
+    client.connect(host, username=user, password=PASSWORD)
     # if PASSWORD is None:
     #     PASSWORD = getpass("Please enter password for the rsa key .ssh/id_rsa\n")
     # pkey = RSAKey.from_private_key_file("/home/cwilmot/.ssh/id_rsa", password=PASSWORD)
     # client.connect(host, username=user, pkey=pkey)
-    client.connect(host, username=user, password='Her%Twok7')
     stdin, stdout, stderr = client.exec_command("""(
         eval "$(/home/wilmot/.software/miniconda/miniconda3/bin/conda shell.bash hook)" ;
         export COPPELIASIM_ROOT=/home/aecgroup/aecdata/Software/CoppeliaSim_4.0.0_rev4 ;
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$COPPELIASIM_ROOT ;
         export QT_QPA_PLATFORM_PLUGIN_PATH=$COPPELIASIM_ROOT ;
         export COPPELIASIM_MODEL_PATH=/home/wilmot/Documents/code/coppelia_sim_inverse_model/3d_models/ ;
-        cd Documents/code/duplicates_of_other_repos/coppelia_sim_inverse_model/src ;
+        cd Documents/code/coppelia_sim_inverse_model/src ;
         {})""".format(cmd))
     for line in stdout.readlines():
         print(line, end="")

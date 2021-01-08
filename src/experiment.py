@@ -66,7 +66,7 @@ def experiment(cfg):
             procedure.replay(
                 record=True,
                 video_name='./replays/replay_final.mp4',
-                n_episodes=10,
+                n_episodes=1,
                 exploration=False
             )
         print("Experiment finished, hope it worked. Good bye!")
