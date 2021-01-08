@@ -7,12 +7,12 @@ from td3 import TD3
 
 class Agent(object):
     def __init__(self,
-            policy_learning_rate, policy_model_arch,
+            policy_primitive_learning_rate, policy_movement_learning_rate, policy_model_arch,
             critic_learning_rate, critic_model_arch,
             target_smoothing_stddev, tau, exploration_prob,
             state_size, action_size, goal_size, n_simulations,
-            movement_learning_rate_ratio, movement_exploration_prob_ratio):
-        self.movement_learning_rate_ratio = movement_learning_rate_ratio
+            movement_exploration_prob_ratio,
+            policy_bottleneck_size, policy_default_layer_size, critic_default_layer_size):
         self.movement_exploration_prob_ratio = movement_exploration_prob_ratio
         full_policy_model = keras.models.model_from_yaml(
             policy_model_arch.pretty(resolve=True),
@@ -38,7 +38,7 @@ class Agent(object):
             ])
             self.primitive_size = primitive_policy_model.layers[-2].units
             self.primitive_td3 = TD3(
-                policy_learning_rate=policy_learning_rate,
+                policy_learning_rate=policy_primitive_learning_rate,
                 policy_model=primitive_policy_model,
                 critic_learning_rate=critic_learning_rate,
                 critic_model=keras.models.model_from_yaml(
@@ -53,7 +53,7 @@ class Agent(object):
                 n_simulations=n_simulations,
             )
             self.movement_td3 = TD3(
-                policy_learning_rate=policy_learning_rate * self.movement_learning_rate_ratio,
+                policy_learning_rate=policy_movement_learning_rate,
                 policy_model=movement_policy_model,
                 critic_learning_rate=critic_learning_rate,
                 critic_model=keras.models.model_from_yaml(
@@ -72,7 +72,7 @@ class Agent(object):
             self.primitive_td3 = None
             self.primitive_size = None
             self.movement_td3 = TD3(
-                policy_learning_rate=policy_learning_rate,
+                policy_learning_rate=policy_movement_learning_rate,
                 policy_model=movement_policy_model,
                 critic_learning_rate=critic_learning_rate,
                 critic_model=keras.models.model_from_yaml(
