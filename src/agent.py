@@ -111,7 +111,7 @@ class Agent(object):
             pure_primitive = pure_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
             noisy_primitive = noisy_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
             noise_primitive = noise_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
-            primitive_passed_to_movement_net = noise_primitive if noise else pure_primitive
+            primitive_passed_to_movement_net = noisy_primitive if noise else pure_primitive
             pure_movement, noisy_movement, noise_movement = self.movement_td3.get_actions(
                 primitive_passed_to_movement_net, # shape [..., primitive_size]
                 target=target,

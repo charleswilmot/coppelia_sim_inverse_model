@@ -47,6 +47,7 @@ class TD3(object):
 
     def save_weights(self, path):
         self.policy_model.save_weights(path + "/policy_model")
+        self.target_policy_model.save_weights(path + "/target_policy_model")
         self.critic_model_0.save_weights(path + "/critic_model_0")
         self.critic_model_1.save_weights(path + "/critic_model_1")
         self.target_critic_model_0.save_weights(path + "/target_critic_model_0")
@@ -54,6 +55,7 @@ class TD3(object):
 
     def load_weights(self, path):
         self.policy_model.load_weights(path + "/policy_model")
+        self.target_policy_model.load_weights(path + "/policy_model")  #, by_name=True, skip_mismatch=True)
         self.critic_model_0.load_weights(path + "/critic_model_0")
         self.critic_model_1.load_weights(path + "/critic_model_1")
         self.target_critic_model_0.load_weights(path + "/target_critic_model_0")
@@ -92,20 +94,26 @@ class TD3(object):
         return self.noise_layer.log_stddevs.numpy()
 
     @tf.function
-    def get_return_estimates(self, critic_states, actions, target=False):
+    def get_return_estimates(self, critic_states, actions, target=False, mode='mean'):
         inps = tf.concat([critic_states, actions], axis=-1)
         if target:
             target_0 = self.target_critic_model_0(inps)
             target_1 = self.target_critic_model_1(inps)
             return tf.minimum(target_0, target_1)
         else:
-            return (self.critic_model_0(inps) + self.critic_model_1(inps)) / 2
+            if mode == 'mean':
+                return (self.critic_model_0(inps) + self.critic_model_1(inps)) / 2
+            elif mode == 'both':
+                return self.critic_model_0(inps), self.critic_model_1(inps)
 
     @tf.function
     def train_critic(self, critic_states, actions, targets):
         with tf.GradientTape() as tape:
-            estimates = self.get_return_estimates(critic_states, actions)
-            loss_critic = keras.losses.Huber()(estimates, tf.stop_gradient(targets))
+            estimates_0, estimates_1 = self.get_return_estimates(critic_states, actions, mode='both')
+            loss_critic = 0.5 * (
+                keras.losses.Huber()(estimates_0, tf.stop_gradient(targets)) +
+                keras.losses.Huber()(estimates_1, tf.stop_gradient(targets))
+            )
             vars = self.critic_model_0.variables + self.critic_model_1.variables
             grads = tape.gradient(loss_critic, vars)
             self.critic_optimizer.apply_gradients(zip(grads, vars))
@@ -117,7 +125,7 @@ class TD3(object):
             # policy_states has shape [batch_size, state_size]
             # critic_states has shape [batch_size, n_actions_in_movement, state_size]
             actions, _, _ = self.get_actions(policy_states) # shape [batch_size, n_actions_in_movement, action_size]
-            estimates = self.get_return_estimates(critic_states, actions)
+            estimates = self.get_return_estimates(critic_states, actions, mode='mean')
             loss = - tf.reduce_sum(estimates)
             vars = self.policy_model.trainable_variables
             grads = tape.gradient(loss, vars)
