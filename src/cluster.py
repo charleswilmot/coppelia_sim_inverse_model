@@ -72,12 +72,6 @@ def node_list_availability(node_list, min_cpus=10, min_free_mem=20000):
 
 
 def get_partition_reservation():
-    # OPTION 1
-    print("checking OPTION 1 ... ", end="")
-    if node_list_availability(["xavier", "iceman", "jubilee", "frost", "beast", "cyclops", "shadowcat"]):
-        print("free space available, sending job")
-        return "x-men", None
-    print("no free space")
     # OPTION 2
     print("checking OPTION 2 ... ", end="")
     if node_list_availability(["turbine", "vane"]):
@@ -89,6 +83,12 @@ def get_partition_reservation():
     if node_list_availability(["jetski", "speedboat"]):
         print("free space available, sending job")
         return "sleuths", "triesch-shared"
+    print("no free space")
+    # OPTION 1
+    print("checking OPTION 1 ... ", end="")
+    if node_list_availability(["xavier", "iceman", "jubilee", "frost", "beast", "cyclops", "shadowcat"]):
+        print("free space available, sending job")
+        return "x-men", None
     print("no free space")
     print("No space available on the cluster. Defaulting to x-men OPTION 1")
     return "x-men", None

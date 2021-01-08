@@ -19,6 +19,18 @@ class LinspaceInitializer(keras.initializers.Initializer):
         return {"start": self.start, "stop": self.stop}
 
 
+class IdentityLayer(keras.layers.Layer):
+    def __init__(self, units):
+        super().__init__(self)
+        self.units = int(units)
+
+    def call(self, inputs):
+        return inputs
+
+    def get_config(self):
+        return {"units": self.units}
+
+
 class NormalNoise(keras.layers.Layer):
     def __init__(self, n_simulations, min_log_stddev, max_log_stddev, clip_min=None, clip_max=None):
         super().__init__(self)
@@ -86,6 +98,7 @@ class NormalNoise(keras.layers.Layer):
 custom_objects = {
     "ReConcatDense": ReConcatDense,
     "NormalNoise": NormalNoise,
+    "IdentityLayer": IdentityLayer,
 }
 
 
