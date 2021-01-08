@@ -170,8 +170,8 @@ class SimulationConsumerAbstract(mp.Process):
 
     def signal_command_pipe_empty(self):
         self._process_io["command_pipe_empty"].set()
-        time.sleep(0.1)
-        self._process_io["command_pipe_empty"].clear()
+        while self._process_io["command_pipe_empty"].is_set():
+            time.sleep(0.1)
 
     def good_bye(self):
         pass
@@ -436,8 +436,8 @@ class SimulationConsumer(SimulationConsumerAbstract):
         stateful_objects_states_sequence = []
         for mini_sequence in velocities:
             state, stateful_objects_state = self.get_data()
-            states_sequence.append(state)
-            stateful_objects_states_sequence.append(stateful_objects_state)
+            states_sequence.append(np.copy(state))
+            stateful_objects_states_sequence.append(np.copy(stateful_objects_state))
             for velocity in mini_sequence:
                 self.set_joint_target_velocities(velocity)
                 self.step_sim()
@@ -453,13 +453,13 @@ class SimulationConsumer(SimulationConsumerAbstract):
         frames = []
         for mini_sequence in velocities:
             state, stateful_objects_state = self.get_data()
-            states_sequence.append(state)
-            stateful_objects_states_sequence.append(stateful_objects_state)
+            states_sequence.append(np.copy(state))
+            stateful_objects_states_sequence.append(np.copy(stateful_objects_state))
             for velocity in mini_sequence:
                 frames.append(self.get_frame(cam_id))
                 self.set_joint_target_velocities(velocity)
                 self.step_sim()
-        return np.vstack(states_sequence), np.vstack(stateful_objects_states_sequence), metabolic_costs, np.vstack(frames)
+        return np.vstack(states_sequence), np.vstack(stateful_objects_states_sequence), metabolic_costs, np.array(frames)
 
     def set_control_loop_enabled(self, bool):
         for arm in self._arm_list:
@@ -640,21 +640,35 @@ class SimulationProducer(object):
         if not self._closed:
             # print("Producer closing")
             if self._consumer.is_alive():
-                self._wait_command_pipe_empty()
+                self._wait_command_pipe_empty(timeout=10)
                 # print("command pipe empty, setting must_quit flag")
                 self._process_io["must_quit"].set()
                 # print("flushing command pipe")
                 self.good_bye()
             self._closed = True
             # print("succesfully closed")
-            self._consumer.join()
-            print("consumer {} closed".format(self._consumer._id))
+            # print("consumer {} joining ...".format(self._consumer._id))
+            self._consumer.join(timeout=10)
+            if self._consumer.exitcode is None:
+                print("consumer {} joining ... failed".format(self._consumer._id))
+                print("consumer {} sending SIGTERM".format(self._consumer._id))
+                self._consumer.terminate()
+                self._consumer.join(timeout=10)
+                print("consumer {} joining after SIGTERM ...".format(self._consumer._id))
+                self._consumer.join(timeout=10)
+                if self._consumer.exitcode is None:
+                    print("consumer {} joining after SIGTERM ... failed".format(self._consumer._id))
+            else:
+                print("consumer {} closed".format(self._consumer._id))
         else:
             print("{} already closed, doing nothing".format(self._consumer._id))
 
-    def _wait_command_pipe_empty(self):
+    def _wait_command_pipe_empty(self, timeout=None):
         self._send_command(SimulationConsumer.signal_command_pipe_empty)
-        self._process_io["command_pipe_empty"].wait()
+        if not self._process_io["command_pipe_empty"].wait(timeout=timeout):
+            print("consumer {} : Command pipe was not empty after a timeout of {}sec. Exiting without completing all commands".format(self._consumer.id, timeout))
+        else:
+            self._process_io["command_pipe_empty"].clear()
 
     def __del__(self):
         self.close()
@@ -960,7 +974,7 @@ if __name__ == '__main__':
         np.set_printoptions(precision=3, linewidth=120, suppress=True, sign=' ')
         simulation = SimulationProducer(
             scene=MODEL_PATH + '/custom_timestep.ttt',
-            gui=True
+            gui=False
         )
         simulation.create_environment('one_arm_2_buttons_1_levers_1_tap')
         dt = 0.05
@@ -969,30 +983,28 @@ if __name__ == '__main__':
         simulation.set_simulation_timestep(dt)
         simulation.set_control_loop_enabled(False)
         simulation.start_sim()
+        simulation.step_sim()
         n_joints = simulation.get_n_joints()
+        simulation.apply_movement(np.zeros((1, n_joints)), span=span, mode='minimalist')
+        simulation.step_sim()
 
-        N = 100
+        N = 10
         if mode == 'minimalist':
-            actions = np.random.uniform(low=-1, high=1, size=(N, n_joints))
+            actions = np.random.uniform(low=-1, high=1, size=(N, 1, n_joints))
         elif mode == 'cubic_hermite':
-            actions = np.random.uniform(low=-1, high=1, size=(N, n_joints * 4))
+            actions = np.random.uniform(low=-1, high=1, size=(N, 1, n_joints * 4))
+        elif mode == 'full_raw':
+            actions = np.random.uniform(low=-1, high=1, size=(N, span, n_joints))
 
         t0 = time.time()
 
-        metabolic_costs = []
         for i, action in enumerate(actions):
-            state, _, metabolic_cost = simulation.apply_movement(action, span=span, mode=mode)
+            states, current_goals, metabolic_cost = simulation.apply_movement(action, span=span, mode=mode)
             print(i)
-            print(state[:7])
-            print(state[7:14])
-            print(state[14:21])
-            print(state[21:])
-            print(metabolic_cost)
-            metabolic_costs.append(metabolic_cost)
+            print(states, current_goals)
 
         t1 = time.time()
 
-        print('mean', np.mean(metabolic_costs), 'std', np.std(metabolic_costs))
         print("{} iteration in {:.3f} sec ({:.3f} it/sec)".format(N, t1 - t0, N / (t1 - t0)))
         simulation.stop_sim()
         simulation.close()
@@ -1023,4 +1035,5 @@ if __name__ == '__main__':
         simulation.close()
 
     # open_one_environment()
-    test_9(mode='cubic_hermite')
+    test_9(mode='minimalist')
+    test_9(mode='full_raw')
