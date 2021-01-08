@@ -4,26 +4,16 @@ backend: tensorflow
 class_name: Sequential
 config:
   layers:
-  - class_name: Dense
+  - class_name: IdentityLayer
     config:
-      activation: relu
-      activity_regularizer: null
-      bias_constraint: null
-      bias_initializer:
-        class_name: Zeros
-        config: {}
-      bias_regularizer: null
-      dtype: float32
-      kernel_constraint: null
-      kernel_initializer:
-        class_name: GlorotUniform
-        config:
-          seed: null
-      kernel_regularizer: null
-      name: dense
-      trainable: true
-      units: ${agent.policy_default_layer_size}
-      use_bias: true
+      units: ${sum:${agent.state_size},${agent.goal_size}}
+  - class_name: NormalNoise
+    config:
+      clip_min: null
+      clip_max: null
+      min_log_stddev: ${log:${procedure.std_autotuner.min_stddev}}
+      max_log_stddev: ${log:${procedure.std_autotuner.max_stddev}}
+      n_simulations: ${simulation.n}
   - class_name: Dense
     config:
       activation: relu

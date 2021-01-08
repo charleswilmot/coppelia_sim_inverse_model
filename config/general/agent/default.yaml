@@ -11,3 +11,6 @@ tau: 0.001
 exploration_prob: 0.4
 movement_learning_rate_ratio: 1.0
 movement_exploration_prob_ratio: 0.5
+policy_bottleneck_size: 7
+policy_default_layer_size: 200
+critic_default_layer_size: 500
