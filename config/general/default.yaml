@@ -8,15 +8,15 @@ experiment:
   critic_every: 1
   evaluate_every: 20
   record_episode_every: 1000000000
-  save_every: 100
-  final_recording: True
+  save_every: 250
+  final_recording: False # requires gpu
   dump_buffers_at:
     - 100000
 
 defaults:
   - agent: default
   - agent/policy_model_arch: default
-  - agent/critic_model_arch: default
+  - agent/critic_model_arch: 5_layers
   - procedure: default
   - procedure/std_autotuner: default
   - simulation: default

@@ -3,9 +3,11 @@
 episode_length: 25
 batch_size: 256
 discount_factor: 0.7
-noise_magnitude_limit: 0.1
+movement_noise_magnitude_limit: 1.5
+primitive_noise_magnitude_limit: 1.5
 updates_per_sample: 8
 simulation_timestep: 0.2
+save_std_autotuner_plots: False
 movement_mode: minimalist
 movement_span_in_sec: 2
 policy_output_size: ${get_policy_output_size:${procedure.movement_mode},${procedure.simulation_timestep},${procedure.movement_span_in_sec},${simulation.n_joints}}
