@@ -107,6 +107,20 @@ class TD3(object):
                 return self.critic_model_0(inps), self.critic_model_1(inps)
 
     @tf.function
+    def update_targets(self):
+        model_target_pairs = [
+            (self.critic_model_0, self.target_critic_model_0),
+            (self.critic_model_1, self.target_critic_model_1),
+            (self.policy_model, self.target_policy_model),
+        ]
+        for model, target in model_target_pairs:
+            for model_var, target_var in zip(model.trainable_variables, target.trainable_variables):
+                target_var.assign(
+                    (1 - self.tau) * target_var +
+                    self.tau * model_var
+                )
+
+    @tf.function
     def train_critic(self, critic_states, actions, targets):
         with tf.GradientTape() as tape:
             estimates_0, estimates_1 = self.get_return_estimates(critic_states, actions, mode='both')
@@ -131,20 +145,6 @@ class TD3(object):
             grads = tape.gradient(loss, vars)
             self.policy_optimizer.apply_gradients(zip(grads, vars))
         return loss
-
-    @tf.function
-    def update_targets(self):
-        model_target_pairs = [
-            (self.critic_model_0, self.target_critic_model_0),
-            (self.critic_model_1, self.target_critic_model_1),
-            (self.policy_model, self.target_policy_model),
-        ]
-        for model, target in model_target_pairs:
-            for model_var, target_var in zip(model.trainable_variables, target.trainable_variables):
-                target_var.assign(
-                    (1 - self.tau) * target_var +
-                    self.tau * model_var
-                )
 
     @tf.function
     def train(self, policy_states, critic_states, actions, critic_target,

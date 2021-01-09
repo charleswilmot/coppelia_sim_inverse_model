@@ -684,9 +684,9 @@ class Procedure(object):
             if recompute_noise:
                 primitive_noises = buffer["primitive"]["noisy_actions"] - pure_target_primitive.numpy()
             else:
-                if "noises" in buffer["primitive"].dtype.fields:
+                if "noises" in buffer["primitive"].dtype.fields: # ie _train_data_buffer
                     primitive_noises = buffer["primitive"]["noises"]
-                else:
+                else: # ie _evaluation_data_buffer
                     primitive_noises = np.zeros_like(buffer["primitive"]["pure_actions"])
             primitive_alphas = get_alphas(primitive_noises, self.primitive_noise_magnitude_limit)
             primitive_alphas *= np.min(movement_alphas, axis=-1)

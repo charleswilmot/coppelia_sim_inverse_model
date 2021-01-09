@@ -30,6 +30,6 @@ def get_action_size(movement_mode, n_joints):
 
 OmegaConf.register_resolver("get_policy_output_size", get_policy_output_size)
 OmegaConf.register_resolver("get_action_size", get_action_size)
-OmegaConf.register_resolver("slash_to_dot", lambda x: x.replace('/', '.'))
+OmegaConf.register_resolver("slash_to_dot", lambda x: x.replace('/', '.').replace('agent', 'a').replace('experiment', 'e').replace('procedure', 'p'))
 OmegaConf.register_resolver("log", lambda x: np.log(float(x)))
 OmegaConf.register_resolver("sum", lambda x, y: int(x) + int(y))
