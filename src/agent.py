@@ -122,6 +122,18 @@ class Agent(object):
             raise ValueError("Can not get MPs, Agent has no movement primitive")
 
     @tf.function
+    def get_primitive(self, policy_states, target=False):
+        # policy_states shape [..., state_size]
+        if self.has_movement_primitive:
+            pure_primitive, noisy_primitive, noise_primitive = self.primitive_td3.get_actions(policy_states, target=target, explore=False)
+            pure_primitive = pure_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
+            noisy_primitive = noisy_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
+            noise_primitive = noise_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
+            return pure_primitive, noisy_primitive, noise_primitive
+        else:
+            raise ValueError("Can not get MPs, Agent has no movement primitive")
+
+    @tf.function
     def get_movement(self, policy_states, target=False):
         explore = tf.random.uniform(shape=(self.n_simulations,)) < self.exploration_prob
         return self.movement_td3.get_actions(policy_states, target=target, explore=explore)
