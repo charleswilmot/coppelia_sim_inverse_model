@@ -28,7 +28,7 @@ hydra:
     dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}_${slash_to_dot:${hydra.job.override_dirname}}
   sweep:
     dir: ../experiments/${now:%Y-%m-%d}/${now:%H-%M-%S}/
-    subdir: job${hydra.job.num}_${slash_to_dot:${hydra.job.override_dirname}}
+    subdir: job${pad_number:${hydra.job.num}}_${slash_to_dot:${hydra.job.override_dirname}}
   job:
     config:
       # configuration for the ${hydra.job.override_dirname} runtime variable
