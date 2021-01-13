@@ -61,6 +61,15 @@ def get_n_free_gpus(node):
     return total - used
 
 
+def get_n_pending_job_per_option():
+    info = os.popen("squeue -h -u wilmot -o '%P;%v;%t'").read().split('\n')
+    ret = {'x-men;(null);PD': 0, 'sleuths;(null);PD': 0, 'sleuths;triesch-shared;PD': 0}
+    for i in info:
+        if i.split(';')[-1] == 'PD':
+            ret[i] += 1
+    return ret
+
+
 def node_list_availability(node_list, min_cpus=10, min_free_mem=20000):
     for node in node_list:
         n_free_cpus = get_n_free_cpus(node)
@@ -90,7 +99,22 @@ def get_partition_reservation():
         print("free space available, sending job")
         return "x-men", None
     print("no free space")
-    print("No space available on the cluster. Defaulting to x-men OPTION 1")
+    n_pending_job_per_option = get_n_pending_job_per_option()
+    pending_job_target_ratio = {'x-men;(null);PD': 0.34, 'sleuths;(null);PD': 0.33, 'sleuths;triesch-shared;PD': 0.33}
+    total = sum(n_pending_job_per_option.values())
+    if total == 0:
+        print("no pending job, sending to x-men")
+        return "x-men", None
+    pending_job_ratio = {key: value / total for key, value in n_pending_job_per_option.items()}
+    print("current ratio of pending job is:", pending_job_ratio)
+    print("target  ratio of pending job is:", pending_job_target_ratio)
+    for key in pending_job_target_ratio:
+        if pending_job_ratio[key] <= pending_job_target_ratio[key]:
+            partition, reservation, _ = key.split(';')
+            reservation = None if reservation == '(null)' else reservation
+            print("sending on {} with reservation {}".format(partition, reservation))
+            return partition, reservation
+    print("Defaulting to x-men OPTION 1")
     return "x-men", None
 
 
