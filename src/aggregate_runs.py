@@ -14,8 +14,8 @@ def group_by_repetition(scalars):
     # job[0-9]+_([a-zA-Z0-9\._\/]*)
     groups = defaultdict(list)
     for run in runs:
-        match_repetition = re.match("job[0-9]+_([a-zA-Z0-9\._\/]*)repetition\.([0-9]+)([a-zA-Z0-9\._\/]*)", run)
-        match_no_repetition = re.match("job[0-9]+_([a-zA-Z0-9\._\/]*)", run)
+        match_repetition = re.match("[0-9\-\/]*job[0-9]+_([a-zA-Z0-9\._\/]*)repetition\.([0-9]+)([a-zA-Z0-9\._\/]*)", run)
+        match_no_repetition = re.match("[0-9\-\/]*job[0-9]+_([a-zA-Z0-9\._\/]*)", run)
         if match_repetition:
             A = match_repetition.group(1)
             C = match_repetition.group(3)
@@ -56,16 +56,32 @@ def group_by_repetition(scalars):
     return renamed_groups
 
 
+def get_mean_std(data):
+    all_length = sorted([len(d["value"]) for d in data])
+    min_length = min(all_length)
+    max_length = max(all_length)
+    std_index_limit = all_length[-2]
+    x = [d.step for d in data if len(d.step) == max_length][0]
+    mean = np.zeros(max_length)
+    std = np.zeros(max_length)
+    print(all_length)
+    unique_all_length = sorted(set(all_length))
+    for start, stop in zip([0] + unique_all_length, unique_all_length):
+        print(start, stop)
+        valid_data = [d for d in data if len(d["value"]) >= stop]
+        mean[start:stop] = np.mean([d["value"][start:stop] for d in valid_data], axis=0)
+        if stop <= std_index_limit:
+            std[start:stop] = np.std([d["value"][start:stop] for d in valid_data], axis=0)
+    return x, mean, std
+
+
 def plot_by_tag(fig, scalars, groups, tag):
     ax = fig.add_subplot(111)
     for name, runs in groups.items(): # for each group
         data = [scalars[scalars.run.eq(run) & scalars.tag.eq(tag)] for run in runs]
-        x = data[0].step
-        mean = np.mean([d["value"] for d in data], axis=0)
+        x, mean, std = get_mean_std(data)
         line, = ax.plot(x, mean, label=name)
-        if len(runs) > 1:
-            std = np.std([d["value"] for d in data], axis=0)
-            ax.fill_between(x, mean - std, mean + std, color=line.get_color(), alpha=0.1)
+        ax.fill_between(x, mean - std, mean + std, color=line.get_color(), alpha=0.1)
     scalar_name = tag.split("/")[-1].replace('_', ' ')
     n_repetitions = set(len(runs) for runs in groups.values())
     if len(n_repetitions) == 1:
