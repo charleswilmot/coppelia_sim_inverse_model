@@ -180,12 +180,13 @@ class Procedure(object):
         self.action_size = int(agent_conf.action_size)
         self.primitive_size = self.agent.primitive_size
         self.n_actions_in_movement = int(procedure_conf.policy_output_size) // self.action_size
-        if self.has_movement_primitive:
-            self.primitive_discount_factor = np.power(self.discount_factor, self.n_actions_in_movement * procedure_conf.simulation_timestep)
-        self.movement_discount_factor = np.power(self.discount_factor, procedure_conf.simulation_timestep)
         # if self.has_movement_primitive:
         #     self.primitive_discount_factor = np.power(self.discount_factor, self.n_actions_in_movement * procedure_conf.simulation_timestep)
-        # self.movement_discount_factor = np.power(self.discount_factor, (self.n_actions_in_movement * procedure_conf.simulation_timestep) / self.n_actions_in_movement)
+        # self.movement_discount_factor = np.power(self.discount_factor, procedure_conf.simulation_timestep)
+        one_action_span_in_sec = procedure_conf.simulation_timestep if self.movement_mode == 'full_raw' else procedure_conf.movement_span_in_sec
+        if self.has_movement_primitive:
+            self.primitive_discount_factor = np.power(self.discount_factor, self.n_actions_in_movement * one_action_span_in_sec)
+        self.movement_discount_factor = np.power(self.discount_factor, one_action_span_in_sec)
 
         print("self.goal_size", self.goal_size)
         print("self.state_size", self.state_size)
