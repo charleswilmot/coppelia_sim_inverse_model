@@ -11,7 +11,7 @@ def get_policy_output_size(movement_mode, simulation_timestep, movement_span_in_
         policy_output_size = n_actions * n_joints
     elif movement_mode in ["minimalist", "one_raw"]:
         policy_output_size = n_joints
-    elif movement_mode in ["hermite"]:
+    elif movement_mode in ["cubic_hermite"]:
         policy_output_size = n_joints * 4
     else:
         raise ValueError("Movement mode not recognized ({})".format(movement_mode))
@@ -22,7 +22,7 @@ def get_action_size(movement_mode, n_joints):
     n_joints = int(n_joints)
     if movement_mode in ["full_raw", "minimalist", "one_raw"]:
         return n_joints
-    elif movement_mode in ["hermite"]:
+    elif movement_mode in ["cubic_hermite"]:
         return n_joints * 4
     else:
         raise ValueError("Movement mode not recognized ({})".format(movement_mode))
@@ -33,3 +33,4 @@ OmegaConf.register_resolver("get_action_size", get_action_size)
 OmegaConf.register_resolver("slash_to_dot", lambda x: x.replace('/', '.').replace('agent', 'a').replace('experiment', 'e').replace('procedure', 'p'))
 OmegaConf.register_resolver("log", lambda x: np.log(float(x)))
 OmegaConf.register_resolver("sum", lambda x, y: int(x) + int(y))
+OmegaConf.register_resolver("pad_number", lambda x: "{:02d}".format(int(x)))
