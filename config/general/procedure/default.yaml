@@ -2,7 +2,7 @@
 
 episode_length: 25
 batch_size: 256
-discount_factor: 0.7
+discount_factor: 0.83666
 movement_noise_magnitude_limit: 1.5
 primitive_noise_magnitude_limit: 1.5
 updates_per_sample: 8

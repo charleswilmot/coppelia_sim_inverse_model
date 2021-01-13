@@ -181,8 +181,11 @@ class Procedure(object):
         self.primitive_size = self.agent.primitive_size
         self.n_actions_in_movement = int(procedure_conf.policy_output_size) // self.action_size
         if self.has_movement_primitive:
-            self.primitive_discount_factor = self.discount_factor
-        self.movement_discount_factor = np.power(self.discount_factor, 1 / self.n_actions_in_movement)
+            self.primitive_discount_factor = np.power(self.discount_factor, self.n_actions_in_movement * procedure_conf.simulation_timestep)
+        self.movement_discount_factor = np.power(self.discount_factor, procedure_conf.simulation_timestep)
+        # if self.has_movement_primitive:
+        #     self.primitive_discount_factor = np.power(self.discount_factor, self.n_actions_in_movement * procedure_conf.simulation_timestep)
+        # self.movement_discount_factor = np.power(self.discount_factor, (self.n_actions_in_movement * procedure_conf.simulation_timestep) / self.n_actions_in_movement)
 
         print("self.goal_size", self.goal_size)
         print("self.state_size", self.state_size)
@@ -1078,7 +1081,7 @@ class Procedure(object):
         with self.simulation_pool.distribute_args():
             states, current_goals, metabolic_costs = \
                 tuple(zip(*self.simulation_pool.apply_movement(
-                    movement,
+                    movement.numpy(),
                     mode=self.movement_modes,
                     span=self.movement_spans
                 )))
@@ -1089,7 +1092,7 @@ class Procedure(object):
         with self.simulation_pool.distribute_args():
             states, current_goals, metabolic_costs, frames = \
                 tuple(zip(*self.simulation_pool.apply_movement_get_frames(
-                    movement,
+                    movement.numpy(),
                     cam_ids,
                     mode=self.movement_modes,
                     span=self.movement_spans
