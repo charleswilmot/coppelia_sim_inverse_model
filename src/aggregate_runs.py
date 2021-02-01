@@ -1,3 +1,4 @@
+import tikzplotlib
 from tensorboard.data.experimental import ExperimentFromDev
 import re
 from collections import defaultdict
@@ -14,7 +15,7 @@ def group_by_repetition(scalars):
     # job[0-9]+_([a-zA-Z0-9\._\/]*)
     groups = defaultdict(list)
     for run in runs:
-        match_repetition = re.match("[0-9\-\/]*job[0-9]+_([a-zA-Z0-9\._\/]*)repetition\.([0-9]+)([a-zA-Z0-9\._\/]*)", run)
+        match_repetition = re.match("[0-9\-\/]*job[0-9]+_([a-zA-Z0-9\._\/\-]*)repetition\.([0-9]+)([a-zA-Z0-9\._\/]*)", run)
         match_no_repetition = re.match("[0-9\-\/]*job[0-9]+_([a-zA-Z0-9\._\/]*)", run)
         if match_repetition:
             A = match_repetition.group(1)
@@ -29,7 +30,7 @@ def group_by_repetition(scalars):
     for x in groups:
         if isinstance(x, tuple):
             print("job*_{}repetition.*{}".format(x[0], x[1]))
-        elif isinstance(x, string):
+        elif isinstance(x, str):
             print("job*_{}".format(x))
     print("\n")
     renamed_groups = defaultdict(list)
@@ -46,7 +47,7 @@ def group_by_repetition(scalars):
             suffix = ""
         if isinstance(x, tuple):
             name = input("Please give a short name to job*_{}repetition.*{}\n{}\n".format(x[0], x[1], suffix)) or def_name
-        elif isinstance(x, string):
+        elif isinstance(x, str):
             name = input("Please give a short name to job*_{}\n{}\n".format(x, suffix)) or def_name
         if name != "del":
             renamed_groups[name] += groups[x]
@@ -57,25 +58,31 @@ def group_by_repetition(scalars):
 
 
 def get_mean_std(data):
-    all_length = sorted([len(d["value"]) for d in data])
-    min_length = min(all_length)
-    max_length = max(all_length)
-    std_index_limit = all_length[-2]
-    x = [d.step for d in data if len(d.step) == max_length][0]
-    mean = np.zeros(max_length)
-    std = np.zeros(max_length)
-    print(all_length)
-    unique_all_length = sorted(set(all_length))
-    for start, stop in zip([0] + unique_all_length, unique_all_length):
-        print(start, stop)
-        valid_data = [d for d in data if len(d["value"]) >= stop]
-        mean[start:stop] = np.mean([d["value"][start:stop] for d in valid_data], axis=0)
-        if stop <= std_index_limit:
-            std[start:stop] = np.std([d["value"][start:stop] for d in valid_data], axis=0)
+    all_lengths = sorted([d.step.values[-1] for d in data])
+    all_starts = sorted([d.step.values[0] for d in data])
+    max_start = max(all_starts)
+    min_length = min(all_lengths)
+    max_length = max(all_lengths)
+    std_limit = all_lengths[-2]
+    x = np.arange(max_start, max_length)
+    data = [np.interp(x[x <= d.step.values[-1]], d.step, d["value"]) for d in data]
+    sum_arr = np.zeros(max_length - max_start)
+    count_arr = np.zeros(max_length - max_start, dtype=np.int32)
+    for d in data:
+        sum_arr[:len(d)] += d
+        count_arr[:len(d)] += 1
+    mean = sum_arr / count_arr
+
+    sum_arr = np.zeros(max_length - max_start)
+    count_arr = np.zeros(max_length - max_start, dtype=np.int32)
+    for d in data:
+        sum_arr[:len(d)] += (d - mean[:len(d)]) ** 2
+        count_arr[:len(d)] += 1
+    std = np.sqrt(sum_arr / count_arr)
     return x, mean, std
 
 
-def plot_by_tag(fig, scalars, groups, tag):
+def plot_by_tag(fig, scalars, groups, tag, ylim=None):
     ax = fig.add_subplot(111)
     for name, runs in groups.items(): # for each group
         data = [scalars[scalars.run.eq(run) & scalars.tag.eq(tag)] for run in runs]
@@ -92,22 +99,39 @@ def plot_by_tag(fig, scalars, groups, tag):
     ax.legend()
     ax.set_xlabel("episodes")
     ax.set_ylabel(scalar_name)
+    if ylim is not None:
+        ax.set_ylim(ylim)
 
 
 def aggregate_runs(experiment_id, path):
     exp = ExperimentFromDev(experiment_id)
     scalars = exp.get_scalars()
     groups = group_by_repetition(scalars)
+    available_groups_string = ""
+    for i, key in enumerate(groups):
+        available_groups_string += "{: 2d} \t {}\n".format(i, key)
     fig = plt.figure(dpi=300)
-    for tag in [
-            "evaluation_success_rate_percent",
-            "exploration_success_rate_percent",
-            "evaluation_delta_distance_to_goal",
-            "exploration_delta_distance_to_goal",
-            ]:
-        plot_by_tag(fig, scalars, groups, "collection/{}".format(tag))
-        fig.savefig(path + "/{}.png".format(tag))
-        fig.clf(fig)
+    done = False
+    while not done:
+        which = list(map(int, input("Which groups should be plotted? available are:\n" + available_groups_string).split(',')))
+        groups_to_plot = {key: value for i, (key, value) in enumerate(groups.items()) if i in which}
+        for tag, ylim in [
+                ("evaluation_success_rate_percent_wrt_ep", (0, 105)),
+                ("evaluation_success_rate_percent_wrt_tr", (0, 105)),
+                ("exploration_success_rate_percent_wrt_ep", (0, 105)),
+                ("exploration_success_rate_percent_wrt_tr", (0, 105)),
+                ("evaluation_delta_distance_to_goal_wrt_ep", (0, 2.0)),
+                ("evaluation_delta_distance_to_goal_wrt_tr", (0, 2.0)),
+                ("exploration_delta_distance_to_goal_wrt_ep", (0, 2.0)),
+                ("exploration_delta_distance_to_goal_wrt_tr", (0, 2.0)),
+                ("evaluation_time_to_solve_wrt_ep", (0, 25)),
+                ("evaluation_time_to_solve_wrt_tr", (0, 25)),
+                ]:
+            plot_by_tag(fig, scalars, groups_to_plot, "collection/{}".format(tag), ylim=ylim)
+            fig.savefig(path + "/{}_{}_{}.png".format(tag, "_".join(map(str, which)), experiment_id))
+            # tikzplotlib.save(path + "/{}_{}_{}.tex".format(tag, "_".join(map(str, which)), experiment_id))
+            fig.clf(fig)
+        done = input("make an other plot? (yes/no)") == "no"
     plt.close(fig)
 
 
