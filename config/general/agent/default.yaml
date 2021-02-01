@@ -1,7 +1,7 @@
 # @package _group_
 
 policy_primitive_learning_rate: 1e-3
-policy_movement_learning_rate: 1e-3
+policy_movement_learning_rate: 8e-5
 critic_learning_rate: 1e-3
 state_size: 25
 action_size: ${get_action_size:${procedure.movement_mode},${simulation.n_joints}}
@@ -10,7 +10,7 @@ n_simulations: ${simulation.n}
 target_smoothing_stddev: 0.01
 tau: 0.1
 exploration_prob: 0.4
-movement_exploration_prob_ratio: 0.5
+movement_exploration_prob_ratio: 0.1
 policy_bottleneck_size: 7
 policy_default_layer_size: 200
 critic_default_layer_size: 500

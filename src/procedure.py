@@ -90,49 +90,8 @@ def combine(states, goals):
 
 class Procedure(object):
     def __init__(self, agent_conf, buffer_conf, simulation_conf, procedure_conf):
-        #   PROCEDURE CONF
-        self.episode_length = procedure_conf.episode_length
-        self.updates_per_sample = procedure_conf.updates_per_sample
-        self.batch_size = procedure_conf.batch_size
-        self.n_simulations = simulation_conf.n
-        self.log_freq = procedure_conf.log_freq
-        self.save_std_autotuner_plots = procedure_conf.save_std_autotuner_plots
-        self.movement_mode = procedure_conf.movement_mode
-        self.movement_span = int(procedure_conf.movement_span_in_sec / \
-                                 procedure_conf.simulation_timestep)
-        self.movement_modes = [
-            self.movement_mode for i in range(self.n_simulations)
-        ]
-        self.movement_spans = [
-            self.movement_span for i in range(self.n_simulations)
-        ]
-        self.her_max_replays = procedure_conf.her.max_replays
-        self.discount_factor = procedure_conf.discount_factor
-        self.movement_noise_magnitude_limit = procedure_conf.movement_noise_magnitude_limit
-        self.primitive_noise_magnitude_limit = procedure_conf.primitive_noise_magnitude_limit
-        self.metabolic_cost_scale = procedure_conf.metabolic_cost_scale
-        self.std_autotuner_filter_size = procedure_conf.std_autotuner.filter_size
-        self.std_importance = procedure_conf.std_autotuner.std_importance
-        self.std_temperature = procedure_conf.std_autotuner.temperature
-        self.std_autotuner_plot_path_movement = './std_autotuner_movement/'
-        self.std_autotuner_plot_path_primitive = './std_autotuner_primitive/'
-        #    HPARAMS
-        self._hparams = OrderedDict([
-            ("policy_movement_LR", agent_conf.policy_movement_learning_rate),
-            ("policy_primitive_LR", agent_conf.policy_primitive_learning_rate),
-            ("movement_nml", procedure_conf.movement_noise_magnitude_limit),
-            ("primitive_nml", procedure_conf.primitive_noise_magnitude_limit),
-            ("critic_LR", agent_conf.critic_learning_rate),
-            ("buffer", buffer_conf.size),
-            ("update_rate", procedure_conf.updates_per_sample),
-            ("ep_length", procedure_conf.episode_length),
-            ("batch_size", procedure_conf.batch_size),
-            ("tau", agent_conf.tau),
-            ("target_smoothing", agent_conf.target_smoothing_stddev),
-            ("movement_mode", procedure_conf.movement_mode),
-            ("movement_span", procedure_conf.movement_span_in_sec),
-        ])
         #   OBJECTS
+        self.n_simulations = simulation_conf.n
         self.agent = Agent(**agent_conf)
         self.has_movement_primitive = self.agent.has_movement_primitive
         self.buffer = Buffer(**buffer_conf)
@@ -159,6 +118,63 @@ class Procedure(object):
                 np.log(procedure_conf.std_autotuner.stddev_init),
                 procedure_conf.std_autotuner.reward_init,
             )
+        #   PROCEDURE CONF
+        self.episode_length_in_sec = procedure_conf.episode_length_in_sec
+        self.movement_mode = procedure_conf.movement_mode
+        self.action_size = int(agent_conf.action_size)
+        self.discount_factor = procedure_conf.discount_factor
+        self.n_actions_in_movement = int(procedure_conf.policy_output_size) // self.action_size
+        self.one_action_span_in_sec = procedure_conf.simulation_timestep if self.movement_mode == 'full_raw' else procedure_conf.movement_span_in_sec
+        if self.has_movement_primitive:
+            self.primitive_discount_factor = np.power(self.discount_factor, self.n_actions_in_movement * self.one_action_span_in_sec)
+        self.movement_discount_factor = np.power(self.discount_factor, self.one_action_span_in_sec)
+        if procedure_conf.overwrite_movement_discount_factor != False:
+            self.movement_discount_factor = procedure_conf.overwrite_movement_discount_factor
+        self.episode_length = self.episode_length_in_sec / (self.one_action_span_in_sec * self.n_actions_in_movement)
+        if not self.episode_length.is_integer():
+            print("Warning, the episode length in sec is not divisible by the length of a movement in sec ({} / {} = {}), rounding down".format(self.episode_length_in_sec, (self.one_action_span_in_sec * self.n_actions_in_movement), self.episode_length))
+        self.episode_length = int(self.episode_length)
+        self.updates_per_sample = procedure_conf.updates_per_sample
+        self.batch_size = procedure_conf.batch_size
+        self.log_freq = procedure_conf.log_freq
+        self.save_std_autotuner_plots = procedure_conf.save_std_autotuner_plots
+        self.movement_span = int(procedure_conf.movement_span_in_sec / \
+                                 procedure_conf.simulation_timestep)
+        self.movement_modes = [
+            self.movement_mode for i in range(self.n_simulations)
+        ]
+        self.movement_spans = [
+            self.movement_span for i in range(self.n_simulations)
+        ]
+        self.her_max_replays = procedure_conf.her.max_replays
+        self.movement_noise_magnitude_limit = procedure_conf.movement_noise_magnitude_limit
+        self.primitive_noise_magnitude_limit = procedure_conf.primitive_noise_magnitude_limit
+        self.metabolic_cost_scale = procedure_conf.metabolic_cost_scale
+        self.std_autotuner_filter_size = procedure_conf.std_autotuner.filter_size
+        self.std_importance = procedure_conf.std_autotuner.std_importance
+        self.std_temperature = procedure_conf.std_autotuner.temperature
+        self.std_autotuner_plot_path_movement = './std_autotuner_movement/'
+        self.std_autotuner_plot_path_primitive = './std_autotuner_primitive/'
+        #    HPARAMS
+        self._hparams = OrderedDict([
+            ("policy_movement_LR", agent_conf.policy_movement_learning_rate),
+            ("policy_primitive_LR", agent_conf.policy_primitive_learning_rate),
+            ("movement_nml", procedure_conf.movement_noise_magnitude_limit),
+            ("primitive_nml", procedure_conf.primitive_noise_magnitude_limit),
+            ("movement_df", self.movement_discount_factor),
+            ("primitive_df", self.primitive_discount_factor if self.has_movement_primitive else -1.0),
+            ("critic_LR", agent_conf.critic_learning_rate),
+            ("buffer", buffer_conf.size),
+            ("update_rate", procedure_conf.updates_per_sample),
+            ("ep_length", self.episode_length),
+            ("ep_length_in_sec", self.episode_length_in_sec),
+            ("batch_size", procedure_conf.batch_size),
+            ("tau", agent_conf.tau),
+            ("bottleneck_size", agent_conf.policy_bottleneck_size),
+            ("target_smoothing", agent_conf.target_smoothing_stddev),
+            ("movement_mode", procedure_conf.movement_mode),
+            ("movement_span", procedure_conf.movement_span_in_sec),
+        ])
         #   SIMULATION POOL
         guis = list(simulation_conf.guis)
         self.simulation_pool = SimulationPool(
@@ -177,16 +193,7 @@ class Procedure(object):
         print("[procedure] all simulation started")
         self.goal_size = agent_conf.goal_size
         self.state_size = agent_conf.state_size
-        self.action_size = int(agent_conf.action_size)
         self.primitive_size = self.agent.primitive_size
-        self.n_actions_in_movement = int(procedure_conf.policy_output_size) // self.action_size
-        # if self.has_movement_primitive:
-        #     self.primitive_discount_factor = np.power(self.discount_factor, self.n_actions_in_movement * procedure_conf.simulation_timestep)
-        # self.movement_discount_factor = np.power(self.discount_factor, procedure_conf.simulation_timestep)
-        one_action_span_in_sec = procedure_conf.simulation_timestep if self.movement_mode == 'full_raw' else procedure_conf.movement_span_in_sec
-        if self.has_movement_primitive:
-            self.primitive_discount_factor = np.power(self.discount_factor, self.n_actions_in_movement * one_action_span_in_sec)
-        self.movement_discount_factor = np.power(self.discount_factor, one_action_span_in_sec)
 
         print("self.goal_size", self.goal_size)
         print("self.state_size", self.state_size)
@@ -324,6 +331,10 @@ class Procedure(object):
             "collection/exploration_success_rate_percent", dtype=tf.float32)
         self.tb["collection"]["evaluation"]["success_rate_percent"] = Mean(
             "collection/evaluation_success_rate_percent", dtype=tf.float32)
+        self.tb["collection"]["exploration"]["time_to_solve"] = Mean(
+            "collection/exploration_time_to_solve", dtype=tf.float32)
+        self.tb["collection"]["evaluation"]["time_to_solve"] = Mean(
+            "collection/evaluation_time_to_solve", dtype=tf.float32)
         self.tb["collection"]["exploration"]["diversity_per_ep"] = Mean(
             "collection/exploration_diversity_per_ep", dtype=tf.float32)
         self.tb["collection"]["evaluation"]["diversity_per_ep"] = Mean(
@@ -372,10 +383,11 @@ class Procedure(object):
         path = "./buffers/buffer_{:6d}.pkl".format(self.n_critic_training)
         self.buffer.dump(path)
 
-    def log_metrics(self, key1, key2, step):
+    def log_metrics(self, key1, key2):
         with self.summary_writer.as_default():
             for name, metric in self.tb[key1][key2].items():
-                tf.summary.scalar(metric.name, metric.result(), step=step)
+                tf.summary.scalar(metric.name + "_wrt_ep", metric.result(), step=self.n_exploration_episodes)
+                tf.summary.scalar(metric.name + "_wrt_tr", metric.result(), step=self.n_global_training)
                 metric.reset_states()
 
     def log_summaries(self, exploration=True, evaluation=True, critic=True,
@@ -384,37 +396,31 @@ class Procedure(object):
             self.log_metrics(
                 "collection",
                 "exploration",
-                self.n_exploration_episodes
             )
         if evaluation:
             self.log_metrics(
                 "collection",
                 "evaluation",
-                self.n_exploration_episodes
             )
         if critic:
             self.log_metrics(
                 "training",
                 "movement_critic",
-                self.n_exploration_episodes
             )
             if self.has_movement_primitive:
                 self.log_metrics(
                     "training",
                     "primitive_critic",
-                    self.n_exploration_episodes
                 )
         if policy:
             self.log_metrics(
                 "training",
                 "movement_policy",
-                self.n_exploration_episodes
             )
             if self.has_movement_primitive:
                 self.log_metrics(
                     "training",
                     "primitive_policy",
-                    self.n_exploration_episodes
                 )
 
     def _get_current_training_ratio(self):
@@ -1017,6 +1023,18 @@ class Procedure(object):
         goal_reached = (goals == current_goals).all(axis=-1)
         success_rate_percent = 100 * np.mean(goal_reached.any(axis=(1, 2)))
         tb["success_rate_percent"](success_rate_percent)
+        #
+        simulation_solved = [
+            i for i in range(self.n_simulations)
+            if goal_reached[i, -1, -1] and not goal_reached[i, 0, 0]
+        ] # solved if goal is reached at the end and not at the beg
+        if not len(simulation_solved):
+            tb["time_to_solve"](np.nan)
+        else:
+            goal_reached_solved_sim = goal_reached.reshape((self.n_simulations, -1))[simulation_solved]
+            n_actions_to_solve = np.argmax(goal_reached_solved_sim, axis=1)
+            time_to_solve = n_actions_to_solve * self.one_action_span_in_sec + self.one_action_span_in_sec
+            tb["time_to_solve"](time_to_solve)
         #
         n_uniques = sum([len(np.unique(x.reshape((-1, self.goal_size)), axis=0)) for x in current_goals])
         n_uniques /= self.n_simulations
