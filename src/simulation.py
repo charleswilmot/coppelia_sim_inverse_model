@@ -666,7 +666,7 @@ class SimulationProducer(object):
     def _wait_command_pipe_empty(self, timeout=None):
         self._send_command(SimulationConsumer.signal_command_pipe_empty)
         if not self._process_io["command_pipe_empty"].wait(timeout=timeout):
-            print("consumer {} : Command pipe was not empty after a timeout of {}sec. Exiting without completing all commands".format(self._consumer.id, timeout))
+            print("consumer {} : Command pipe was not empty after a timeout of {}sec. Exiting without completing all commands".format(self._consumer._id, timeout))
         else:
             self._process_io["command_pipe_empty"].clear()
 
