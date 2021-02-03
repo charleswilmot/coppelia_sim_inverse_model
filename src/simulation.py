@@ -277,7 +277,7 @@ class SimulationConsumer(SimulationConsumerAbstract):
         return len(self._stateful_shape_list)
 
     def add_tap(self, position=None, orientation=None):
-        model = self._pyrep.import_model(MODEL_PATH + "/tap.ttm")
+        model = self._pyrep.import_model(MODEL_PATH + "/tap_damping_0_spring_20.ttm")
         model = TapShape(model.get_handle(), self._pyrep)
         if position is not None:
             model.set_position(position)
@@ -297,7 +297,7 @@ class SimulationConsumer(SimulationConsumerAbstract):
         self._add_stateful_object(model)
 
     def add_lever(self, position=None, orientation=None):
-        model = self._pyrep.import_model(MODEL_PATH + "/lever.ttm")
+        model = self._pyrep.import_model(MODEL_PATH + "/lever_45.ttm")
         model = LeverShape(model.get_handle(), self._pyrep)
         if position is not None:
             model.set_position(position)

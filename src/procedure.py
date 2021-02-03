@@ -463,8 +463,6 @@ class Procedure(object):
             return np.zeros(shape=(n, self.goal_size), dtype=np.int32)
         elif mode == 'not_one_only':
             return self.binary(np.random.randint(1, 2 ** self.goal_size))
-        elif mode == 'all':
-            return np.random.randint(2, size=(n, self.goal_size))
         elif mode == 'one_at_a_time':
             ret = np.zeros(shape=(n, self.goal_size), dtype=np.int32)
             ret[:, np.random.randint(self.goal_size, size=n)] = 1
@@ -473,6 +471,8 @@ class Procedure(object):
             pows_2 = [2 ** i for i in range(self.goal_size)]
             choices = np.array([i for i in range(2 ** self.goal_size) if i not in pows_2])
             return self.binary(np.random.choice(choices, n))
+        else:
+            return np.random.randint(2, size=(n, self.goal_size))
 
     def reset_simulations(self, register_states, register_goals, actions=None):
         if actions is None:
@@ -538,7 +538,7 @@ class Procedure(object):
             with open("file_list.txt", "w") as f:
                 for name in video_names:
                     f.write("file '{}'\n".format(name))
-            os.system("ffmpeg -hide_banner -loglevel panic -f concat -safe 0 -i file_list.txt -c copy {}.mp4".format(video_name))
+            os.system("ffmpeg -y -hide_banner -loglevel panic -f concat -safe 0 -i file_list.txt -c copy {}.mp4".format(video_name))
             # os.remove("file_list.txt")
             for name in video_names:
                 os.remove(name)
