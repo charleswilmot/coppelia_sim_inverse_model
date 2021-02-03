@@ -16,3 +16,6 @@ log_freq: 1
 her:
   max_replays: 2
 metabolic_cost_scale: 0.005
+
+evaluation_goals: all # one_only, one_at_a_time
+exploration_goals: all # not_one_only, not_one_at_a_time

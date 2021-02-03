@@ -119,6 +119,8 @@ class Procedure(object):
                 procedure_conf.std_autotuner.reward_init,
             )
         #   PROCEDURE CONF
+        self.evaluation_goals = procedure_conf.evaluation_goals
+        self.exploration_goals = procedure_conf.exploration_goals
         self.episode_length_in_sec = procedure_conf.episode_length_in_sec
         self.movement_mode = procedure_conf.movement_mode
         self.action_size = int(agent_conf.action_size)
@@ -450,11 +452,27 @@ class Procedure(object):
         """Restores the weights from a checkpoint"""
         self.agent.load_weights(path)
 
-    def sample_goals(self, n=None):
-        n = self.n_simulations if n is None else n
+    def binary(self, arr):
+        return np.array([list(np.binary_repr(v, width=self.goal_size)) for v in arr], dtype=np.int32)
+
+    def sample_goals(self, n=None, mode='all'):
         """Returns a binary vector corresponding to the goal states of the
         actuators in the simulation for each simulation"""
-        return np.random.randint(2, size=(n, self.goal_size))
+        n = self.n_simulations if n is None else n
+        if mode == 'one_only':
+            return np.zeros(shape=(n, self.goal_size), dtype=np.int32)
+        elif mode == 'not_one_only':
+            return self.binary(np.random.randint(1, 2 ** self.goal_size))
+        elif mode == 'all':
+            return np.random.randint(2, size=(n, self.goal_size))
+        elif mode == 'one_at_a_time':
+            ret = np.zeros(shape=(n, self.goal_size), dtype=np.int32)
+            ret[:, np.random.randint(self.goal_size, size=n)] = 1
+            return ret
+        elif mode == 'not_one_at_a_time':
+            pows_2 = [2 ** i for i in range(self.goal_size)]
+            choices = np.array([i for i in range(2 ** self.goal_size) if i not in pows_2])
+            return self.binary(np.random.choice(choices, n))
 
     def reset_simulations(self, register_states, register_goals, actions=None):
         if actions is None:
@@ -481,7 +499,7 @@ class Procedure(object):
             )
         for i in range(n_episodes):
             print("replay episode {}".format(i + 1))
-            goals = self.sample_goals()
+            goals = self.sample_goals(mode=self.exploration_goals if exploration else self.evaluation_goals)
             register_states = self.sample_goals()
             states, current_goals = self.reset_simulations(register_states, goals)
             if record:
@@ -717,7 +735,7 @@ class Procedure(object):
 
     def collect_data(self):
         """Performs one episode of exploration, places data in the buffer"""
-        goals = self.sample_goals()
+        goals = self.sample_goals(mode=self.exploration_goals)
         register_states = self.sample_goals()
         states, current_goals = self.reset_simulations(register_states, goals)
         time_start = time.time()
@@ -914,7 +932,7 @@ class Procedure(object):
 
     def evaluate(self):
         """Performs one episode of evaluation"""
-        goals = self.sample_goals()
+        goals = self.sample_goals(mode=self.evaluation_goals)
         register_states = self.sample_goals()
         states, current_goals = self.reset_simulations(register_states, goals)
         time_start = time.time()
