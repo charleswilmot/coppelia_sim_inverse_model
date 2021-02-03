@@ -4,8 +4,8 @@ gui: False
 record: True
 exploration: False
 resolution:
-  - 320
-  - 240
+  - 640
+  - 480
 overlay: False
 n_overlays: 5
 
