@@ -61,7 +61,7 @@ def get_n_free_gpus(node):
     return total - used
 
 
-def node_list_availability(node_list, min_cpus=10, min_free_mem=20000, min_free_gpus=1):
+def node_list_availability(node_list, min_cpus=10, min_free_mem=50000, min_free_gpus=1):
     for node in node_list:
         n_free_cpus = get_n_free_cpus(node)
         n_free_gpus = get_n_free_gpus(node)

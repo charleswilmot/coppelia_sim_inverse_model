@@ -3,7 +3,7 @@ buffer:
 
 experiment:
   repetition: 0
-  n_episodes: 30000
+  n_episodes: 20000
   policy_every: 2
   critic_every: 1
   evaluate_every: 20

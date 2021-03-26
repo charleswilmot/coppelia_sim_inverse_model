@@ -117,9 +117,22 @@ class Agent(object):
                 target=target,
                 explore=movement_explore
             ) # shape [..., n_actions_in_movement, action_size]
+            # pure_movement, noisy_movement, noise_movement = self.get_movement_from_primitive(
+            #     primitive_passed_to_movement_net,
+            #     target=target,
+            #     explore=movement_explore
+            # )
             return pure_primitive, noisy_primitive, noise_primitive, pure_movement, noisy_movement, noise_movement
         else:
             raise ValueError("Can not get MPs, Agent has no movement primitive")
+
+    @tf.function
+    def get_movement_from_primitive(self, primitives, target=False, explore=False):
+        return self.movement_td3.get_actions(
+            primitives, # shape [..., primitive_size]
+            target=target,
+            explore=explore
+        ) # shape [..., n_actions_in_movement, action_size]
 
     @tf.function
     def get_primitive(self, policy_states, target=False):

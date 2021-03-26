@@ -11,6 +11,8 @@ from collections import OrderedDict
 from tensorboard.plugins.hparams import api as hp
 from imageio import get_writer
 from std_autotune import STDAutoTuner
+from utils import appendable_array_file
+from scipy.special import softmax
 
 
 def get_snr_db(signal, noise, axis=1):
@@ -53,6 +55,32 @@ def compute_critic_target(rewards, critic_estimates, alphas, bootstrap, discount
             (1 - flat_alphas[:, i]) * current_targets
         )
     return flat_targets.reshape(original_shape)
+
+
+def merge_frames(frames, color=[235, 149, 52], axis=0):
+    color = np.array(color) / 255 # [3]
+    frames = np.array(frames) # [..., x, y, 3]
+    alignment = np.sum(frames * color, axis=-1)
+    norm = np.sum(frames ** 2, axis=-1) * np.sum(color ** 2)
+    proportion = np.divide(
+        alignment,
+        norm,
+        out=np.full_like(alignment, 1e-3),
+        where=norm > 1e-3,
+    ) # [..., x, y]
+
+    # proportion_norm = np.sum(proportion, axis=axis, keepdims=True)
+    # proportion = np.divide(
+    #     proportion,
+    #     proportion_norm,
+    #     out=np.ones_like(proportion),
+    #     where=proportion_norm != 0,
+    # ) # [..., x, y]
+    proportion = softmax(proportion * 5, axis=axis)
+    # norm_axis = np.arange(proportion.ndim)[:-2]
+    # norm_axis = tuple(range(proportion.ndim - 2))
+    # proportion = proportion / np.sum(proportion, axis=tuple(norm_axis))
+    return np.sum(frames * proportion[..., np.newaxis], axis=axis)
 
 
 # def compute_critic_target(rewards, critic_estimates, noises, bootstrap, discount_factor, noise_magnitude_limit):
@@ -157,6 +185,7 @@ class Procedure(object):
         self.std_temperature = procedure_conf.std_autotuner.temperature
         self.std_autotuner_plot_path_movement = './std_autotuner_movement/'
         self.std_autotuner_plot_path_primitive = './std_autotuner_primitive/'
+        self.bottleneck_size = agent_conf.policy_bottleneck_size
         #    HPARAMS
         self._hparams = OrderedDict([
             ("policy_movement_LR", agent_conf.policy_movement_learning_rate),
@@ -297,6 +326,11 @@ class Procedure(object):
                 shape=(self.n_simulations, self.episode_length),
                 dtype=visualization_data_type
             )
+        self._other_data_dtype = np.dtype([
+            ('goals', np.uint8, (self.goal_size,)),
+            ('current_goals', np.uint8, (self.goal_size,)),
+        ])
+        self._other_data = np.zeros(shape=(self.n_simulations, self.episode_length * self.n_actions_in_movement), dtype=self._other_data_dtype)
 
         # COUNTERS
         self.n_exploration_episodes = 0
@@ -471,6 +505,14 @@ class Procedure(object):
             pows_2 = [2 ** i for i in range(self.goal_size)]
             choices = np.array([i for i in range(2 ** self.goal_size) if i not in pows_2])
             return self.binary(np.random.choice(choices, n))
+        elif mode == 'even':
+            goals = self.binary(range(2 ** self.goal_size))
+            choices = [i for i in range(2 ** self.goal_size) if np.sum(goals[i]) % 2 == 0]
+            return self.binary(np.random.choice(choices, n))
+        elif mode == 'odd':
+            goals = self.binary(range(2 ** self.goal_size))
+            choices = [i for i in range(2 ** self.goal_size) if np.sum(goals[i]) % 2 == 1]
+            return self.binary(np.random.choice(choices, n))
         else:
             return np.random.randint(2, size=(n, self.goal_size))
 
@@ -542,6 +584,71 @@ class Procedure(object):
             # os.remove("file_list.txt")
             for name in video_names:
                 os.remove(name)
+
+    def replay_exploration_overlay(self, goals_pairs, std,
+            video_name='replay_exploration_overlay.mp4', resolution=[320, 240]):
+        """Applies the current policy in the environment"""
+        writer = get_writer(video_name, fps=25)
+        cam_ids = self.simulation_pool.add_camera(
+            position=(1.15, 1.35, 1),
+            orientation=(
+                24 * np.pi / 36,
+                -7 * np.pi / 36,
+                 4 * np.pi / 36
+            ),
+            resolution=resolution
+        )
+        for goal, initial_goal in goals_pairs:
+            print(goal, initial_goal)
+            initial_goals = np.repeat(np.array(initial_goal)[np.newaxis], self.n_simulations, axis=0)
+            goals = np.repeat(np.array(goal)[np.newaxis], self.n_simulations, axis=0)
+            states, current_goals = self.reset_simulations(initial_goals, goals, actions=np.zeros((self.n_simulations, 7)))
+
+            with self.simulation_pool.distribute_args():
+                frames = self.simulation_pool.get_frame(cam_ids) # [40, x, y, 3]
+            # frame = (np.mean(frames, axis=0) * 255).astype(np.uint8)
+            frame = (merge_frames(frames) * 255).astype(np.uint8)
+            for i in range(24):
+                writer.append_data(frame)
+
+            if self.has_movement_primitive:
+                for i in range(2):
+                    pure_primitives, noisy_primitives, noise = self.agent.get_primitive(combine(states, goals))
+                    pure_primitives = pure_primitives.numpy()
+                    # noise = np.linspace(0, 0.2, self.n_simulations)[:, np.newaxis]
+                    noise = np.random.normal(scale=std, size=(self.n_simulations, self.bottleneck_size))
+                    noisy_primitives = pure_primitives + noise
+                    pure_actions, noisy_actions, noise = self.agent.get_movement_from_primitive(noisy_primitives)
+                    states_sequence, current_goals_sequence, metabolic_costs, frames = \
+                        self.apply_movement_get_frames(pure_actions, cam_ids)
+                    # frames has shape [40, n_actions_in_movement, x, y, 3]
+                    frames = (merge_frames(frames) * 255).astype(np.uint8) # [n_actions_in_movement, x, y, 3]
+                    for frame in frames:
+                        for i in range(6):
+                            writer.append_data(frame)
+                    for i in range(24):
+                        writer.append_data(frame)
+                    states = states_sequence[:, -1]
+            else:
+                for i in range(2):
+                    pure_movements, noisy_movements, noise = self.agent.get_movement(combine(states, goals))
+                    # noise = np.linspace(0, 0.2, self.n_simulations)[:, np.newaxis]
+                    noise = np.random.normal(scale=std, size=(self.n_simulations, self.n_actions_in_movement, self.action_size))
+                    noisy_movements = pure_movements + noise
+                    states_sequence, current_goals_sequence, metabolic_costs, frames = \
+                        self.apply_movement_get_frames(noisy_movements, cam_ids)
+                    # frames has shape [40, n_actions_in_movement, x, y, 3]
+                    frames = (merge_frames(frames) * 255).astype(np.uint8) # [n_actions_in_movement, x, y, 3]
+                    for frame in frames:
+                        for i in range(6):
+                            writer.append_data(frame)
+                    for i in range(24):
+                        writer.append_data(frame)
+                    states = states_sequence[:, -1]
+
+        writer.close()
+        with self.simulation_pool.distribute_args():
+            self.simulation_pool.delete_camera(cam_ids)
 
     def replay_overlay(self, max_overlays=5, record=False, n_episodes=10, video_name='overlay.mp4', resolution=[320, 240]):
         """Applies the current policy in the environment"""
@@ -929,6 +1036,10 @@ class Procedure(object):
             self._primitive_visualization_data_buffer["max_step_returns"] = self._evaluation_data_buffer["primitive"]["max_step_returns"]
             with open("./visualization_data/{}_primitive_critic_train.dat".format(self.episode_length), 'ab') as f:
                 f.write(self._primitive_visualization_data_buffer.tobytes())
+        self._other_data['goals'] = self._train_data_buffer['movement']['goals'].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement, self.goal_size))
+        self._other_data['current_goals'] = self._train_data_buffer['movement']['current_goals'].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement, self.goal_size))
+        with appendable_array_file("./visualization_data/training_goals.dat") as f:
+            f.append(self._other_data)
 
     def evaluate(self):
         """Performs one episode of evaluation"""
@@ -1023,6 +1134,10 @@ class Procedure(object):
             self._primitive_visualization_data_buffer["max_step_returns"] = self._evaluation_data_buffer["primitive"]["max_step_returns"]
             with open("./visualization_data/{}_primitive_critic.dat".format(self.episode_length), 'ab') as f:
                 f.write(self._primitive_visualization_data_buffer.tobytes())
+        self._other_data['goals'] = self._evaluation_data_buffer['movement']['goals'].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement, self.goal_size))
+        self._other_data['current_goals'] = self._evaluation_data_buffer['movement']['current_goals'].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement, self.goal_size))
+        with appendable_array_file("./visualization_data/evaluation_goals.dat") as f:
+            f.append(self._other_data)
 
     def accumulate_log_data(self, goals, current_goals,
             metabolic_costs, time, exploration,

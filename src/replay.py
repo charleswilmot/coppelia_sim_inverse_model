@@ -26,15 +26,28 @@ def replay(cfg):
     if cfg.gui:
         simulation_conf.guis = [0]
 
+    goals_pairs = [
+        ([1, 0, 0, 0], [0, 0, 0, 0]),
+        ([0, 1, 0, 0], [0, 0, 0, 0]),
+        ([0, 0, 1, 0], [0, 0, 0, 0]),
+        ([0, 0, 0, 1], [0, 0, 0, 0]),
+        ([0, 1, 1, 1], [1, 1, 1, 1]),
+        ([1, 0, 1, 1], [1, 1, 1, 1]),
+        ([1, 1, 0, 1], [1, 1, 1, 1]),
+        ([1, 1, 1, 0], [1, 1, 1, 1]),
+    ]
+
+
     video_name = 'replay_exploration' if cfg.exploration else 'replay'
     relative_checkpoint_path = "../checkpoints/" + Path(cfg.path).stem
     with Procedure(agent_conf, buffer_conf, simulation_conf,
             procedure_conf) as procedure:
         procedure.restore(relative_checkpoint_path)
         if cfg.overlay:
-            procedure.replay_overlay(
-                record=cfg.record,
-                n_episodes=cfg.n_episodes,
+            procedure.replay_exploration_overlay(
+                goals_pairs=goals_pairs,
+                std=cfg.std,
+                video_name='overlay_exploration_{}.mp4'.format(cfg.std),
                 resolution=cfg.resolution,
             )
         else:

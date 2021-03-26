@@ -63,7 +63,7 @@ def get_n_free_gpus(node):
 
 def get_n_pending_job_per_option():
     info = os.popen("squeue -h -u wilmot -o '%P;%v;%t'").read().split('\n')
-    ret = {'x-men;(null);PD': 0, 'sleuths;(null);PD': 0}
+    ret = {'x-men;(null);PD': 0, 'sleuths;(null);PD': 0, 'sleuths;triesch-shared;PD': 0}
     for i in info:
         if i.split(';')[-1] == 'PD':
             ret[i] += 1
@@ -84,7 +84,7 @@ def get_partition_reservation():
     n_pending_job_per_option = get_n_pending_job_per_option()
     # OPTION 2
     print("checking OPTION 2 ... ", end="")
-    if node_list_availability(["turbine", "vane", "jetski", "speedboat"]):
+    if node_list_availability(["turbine", "vane", "speedboat"]):
         print("free space available, sending job")
         if n_pending_job_per_option["sleuths;(null);PD"] == 0:
             return "sleuths", None
@@ -92,14 +92,14 @@ def get_partition_reservation():
             print("there are pending jobs for that option")
     print("no free space")
     # OPTION 3
-    # print("checking OPTION 3 ... ", end="")
-    # if node_list_availability(["jetski", "speedboat"]):
-    #     print("free space available, sending job")
-    #     if n_pending_job_per_option["sleuths;triesch-shared;PD"] == 0:
-    #         return "sleuths", "triesch-shared"
-    #     else:
-    #         print("there are pending jobs for that option")
-    # print("no free space")
+    print("checking OPTION 3 ... ", end="")
+    if node_list_availability(["jetski"]):
+        print("free space available, sending job")
+        if n_pending_job_per_option["sleuths;triesch-shared;PD"] == 0:
+            return "sleuths", "triesch-shared"
+        else:
+            print("there are pending jobs for that option")
+    print("no free space")
     # OPTION 1
     print("checking OPTION 1 ... ", end="")
     if node_list_availability(["iceman", "jubilee", "frost", "beast", "cyclops", "shadowcat"]):
@@ -109,7 +109,7 @@ def get_partition_reservation():
         else:
             print("there are pending jobs for that option")
     print("no free space")
-    pending_job_target_ratio = {'x-men;(null);PD': 0.5, 'sleuths;(null);PD': 0.5}
+    pending_job_target_ratio = {'x-men;(null);PD': 0.15, 'sleuths;(null);PD': 0.5, 'sleuths;triesch-shared;PD': 0.35}
     total = sum(n_pending_job_per_option.values())
     if total == 0:
         print("no pending job, sending to x-men")

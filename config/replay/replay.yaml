@@ -7,11 +7,11 @@ resolution:
   - 640
   - 480
 overlay: False
-n_overlays: 5
+std: 1.0
 
 hydra:
   run:
-    dir: ${path}/../../replays
+    dir: ${path}/../../replays_${std}
   sweep:
     dir: ${hydra.run.dir}
     subdir: ""
