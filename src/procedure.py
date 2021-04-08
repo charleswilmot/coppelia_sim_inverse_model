@@ -518,7 +518,7 @@ class Procedure(object):
             for iteration in range(self.episode_length):
                 if self.has_movement_primitive:
                     pure_primitive, noisy_primitive, noise_primitive, pure_movement, noisy_movement, noise_movement = \
-                        self.agent.get_primitive_and_movement(combine(states, goals))
+                        self.agent.get_primitive_and_movement(combine(states, goals), noise=exploration)
                 else:
                     pure_movement, noisy_movement, noise_movement = self.agent.get_movement(
                         combine(states, goals))
@@ -694,9 +694,9 @@ class Procedure(object):
             )
 
             pure_target_primitive, noisy_target_primitive, _, pure_target_movement, noisy_target_movement, _ = \
-                self.agent.get_primitive_and_movement(first_states_goals_of_sequence, target=True)  # [..., 0, :] --> need only the first state of the sequence (the actual state)
+                self.agent.get_primitive_and_movement(first_states_goals_of_sequence, target=True, noise=False)  # [..., 0, :] --> need only the first state of the sequence (the actual state)
             _, next_noisy_target_primitive, _, _, next_noisy_target_movement, _ = \
-                self.agent.get_primitive_and_movement(last_states_goals, target=True)
+                self.agent.get_primitive_and_movement(last_states_goals, target=True, noise=False)
 
             primitive_target_return_estimates = self.agent.get_primitive_return_estimates(
                     primitive_states_goals, # shape [n_simulations, episode_length, 25 + 4]
@@ -988,7 +988,7 @@ class Procedure(object):
         for iteration in range(self.episode_length):
             if self.has_movement_primitive:
                 pure_primitive, noisy_primitive, noise_primitive, pure_movement, noisy_movement, noise_movement = \
-                    self.agent.get_primitive_and_movement(combine(states, goals))
+                    self.agent.get_primitive_and_movement(combine(states, goals), noise=False)
             else:
                 pure_movement, noisy_movement, noise_movement = self.agent.get_movement(
                     combine(states, goals))
