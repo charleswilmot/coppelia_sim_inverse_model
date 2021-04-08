@@ -127,7 +127,7 @@ class Procedure(object):
         self.exploration_goals = procedure_conf.exploration_goals
         self.episode_length_in_sec = procedure_conf.episode_length_in_sec
         self.movement_mode = procedure_conf.movement_mode
-        self.action_size = int(agent_conf.action_size)
+        self.action_size = int(agent_conf.action_size)  # 7
         self.discount_factor = procedure_conf.discount_factor
         self.n_actions_in_movement = int(procedure_conf.policy_output_size) // self.action_size
         self.one_action_span_in_sec = procedure_conf.simulation_timestep if self.movement_mode == 'full_raw' else procedure_conf.movement_span_in_sec
