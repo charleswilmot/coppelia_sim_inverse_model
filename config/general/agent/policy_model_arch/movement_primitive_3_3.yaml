@@ -1,5 +1,3 @@
-# @package _group_
-
 backend: tensorflow
 class_name: Sequential
 config:
@@ -20,73 +18,6 @@ config:
         config:
           seed: null
       kernel_regularizer: null
-      name: dense
-      trainable: true
-      units: ${agent.policy_default_layer_size}
-      use_bias: true
-  - class_name: Dense
-    config:
-      activation: relu
-      activity_regularizer: null
-      bias_constraint: null
-      bias_initializer:
-        class_name: Zeros
-        config: {}
-      bias_regularizer: null
-      dtype: float32
-      kernel_constraint: null
-      kernel_initializer:
-        class_name: GlorotUniform
-        config:
-          seed: null
-      kernel_regularizer: null
-      name: dense
-      trainable: true
-      units: ${agent.policy_default_layer_size}
-      use_bias: true
-  - class_name: Dense
-    config:
-      activation: tanh
-      activity_regularizer: null
-      bias_constraint: null
-      bias_initializer:
-        class_name: Zeros
-        config: {}
-      bias_regularizer: null
-      dtype: float32
-      kernel_constraint: null
-      kernel_initializer:
-        class_name: GlorotUniform
-        config:
-          seed: null
-      kernel_regularizer: null
-      name: dense_1
-      trainable: true
-      units: ${agent.policy_bottleneck_size}
-      use_bias: true
-  - class_name: NormalNoise
-    config:
-      clip_min: -1
-      clip_max: 1
-      min_log_stddev: ${log:${procedure.std_autotuner.min_stddev}}
-      max_log_stddev: ${log:${procedure.std_autotuner.max_stddev}}
-      n_simulations: ${simulation.n}
-  - class_name: Dense
-    config:
-      activation: relu
-      activity_regularizer: null
-      bias_constraint: null
-      bias_initializer:
-        class_name: Zeros
-        config: {}
-      bias_regularizer: null
-      dtype: float32
-      kernel_constraint: null
-      kernel_initializer:
-        class_name: GlorotUniform
-        config:
-          seed: null
-      kernel_regularizer: null
       name: dense_1
       trainable: true
       units: ${agent.policy_default_layer_size}
@@ -94,26 +25,6 @@ config:
   - class_name: Dense
     config:
       activation: relu
-      activity_regularizer: null
-      bias_constraint: null
-      bias_initializer:
-        class_name: Zeros
-        config: {}
-      bias_regularizer: null
-      dtype: float32
-      kernel_constraint: null
-      kernel_initializer:
-        class_name: GlorotUniform
-        config:
-          seed: null
-      kernel_regularizer: null
-      name: dense_1
-      trainable: true
-      units: ${agent.policy_default_layer_size}
-      use_bias: true
-  - class_name: Dense
-    config:
-      activation: tanh
       activity_regularizer: null
       bias_constraint: null
       bias_initializer:
@@ -129,15 +40,91 @@ config:
       kernel_regularizer: null
       name: dense_2
       trainable: true
+      units: ${agent.policy_default_layer_size}
+      use_bias: true
+  - class_name: Dense
+    config:
+      activation: tanh
+      activity_regularizer: null
+      bias_constraint: null
+      bias_initializer:
+        class_name: Zeros
+        config: {}
+      bias_regularizer: null
+      dtype: float32
+      kernel_constraint: null
+      kernel_initializer:
+        class_name: GlorotUniform
+        config:
+          seed: null
+      kernel_regularizer: null
+      name: dense_3
+      trainable: true
+      units: ${agent.policy_bottleneck_size}
+      use_bias: true
+  - class_name: PrimitiveModelEnd
+    config:
+      name: primitive_model_end
+  - class_name: Dense
+    config:
+      activation: relu
+      activity_regularizer: null
+      bias_constraint: null
+      bias_initializer:
+        class_name: Zeros
+        config: {}
+      bias_regularizer: null
+      dtype: float32
+      kernel_constraint: null
+      kernel_initializer:
+        class_name: GlorotUniform
+        config:
+          seed: null
+      kernel_regularizer: null
+      name: dense_4
+      trainable: true
+      units: ${agent.policy_default_layer_size}
+      use_bias: true
+  - class_name: Dense
+    config:
+      activation: relu
+      activity_regularizer: null
+      bias_constraint: null
+      bias_initializer:
+        class_name: Zeros
+        config: {}
+      bias_regularizer: null
+      dtype: float32
+      kernel_constraint: null
+      kernel_initializer:
+        class_name: GlorotUniform
+        config:
+          seed: null
+      kernel_regularizer: null
+      name: dense_5
+      trainable: true
+      units: ${agent.policy_default_layer_size}
+      use_bias: true
+  - class_name: Dense
+    config:
+      activation: tanh
+      activity_regularizer: null
+      bias_constraint: null
+      bias_initializer:
+        class_name: Zeros
+        config: {}
+      bias_regularizer: null
+      dtype: float32
+      kernel_constraint: null
+      kernel_initializer:
+        class_name: GlorotUniform
+        config:
+          seed: null
+      kernel_regularizer: null
+      name: dense_6
+      trainable: true
       units: ${procedure.policy_output_size}
       use_bias: true
-  - class_name: NormalNoise
-    config:
-      clip_min: -1  # null
-      clip_max: 1   # null
-      min_log_stddev: ${log:${procedure.std_autotuner.min_stddev}}
-      max_log_stddev: ${log:${procedure.std_autotuner.max_stddev}}
-      n_simulations: ${simulation.n}
 
   name: sequential
 keras_version: 2.3.0-tf

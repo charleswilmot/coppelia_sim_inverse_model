@@ -10,7 +10,6 @@ from visualization import Visualization, visualization_data_type
 from collections import OrderedDict
 from tensorboard.plugins.hparams import api as hp
 from imageio import get_writer
-from std_autotune import STDAutoTuner
 from utils import appendable_array_file
 from scipy.special import softmax
 
@@ -123,29 +122,6 @@ class Procedure(object):
         self.agent = Agent(**agent_conf)
         self.has_movement_primitive = self.agent.has_movement_primitive
         self.buffer = Buffer(**buffer_conf)
-        self.movement_std_autotuner = STDAutoTuner(
-            procedure_conf.std_autotuner.length,
-            self.n_simulations,
-            procedure_conf.std_autotuner.min_stddev,
-            procedure_conf.std_autotuner.max_stddev,
-            importance_ratio=procedure_conf.std_autotuner.importance_ratio
-        )
-        self.movement_std_autotuner.init(
-            np.log(procedure_conf.std_autotuner.stddev_init),
-            procedure_conf.std_autotuner.reward_init,
-        )
-        if self.has_movement_primitive:
-            self.primitive_std_autotuner = STDAutoTuner(
-                procedure_conf.std_autotuner.length,
-                self.n_simulations,
-                procedure_conf.std_autotuner.min_stddev,
-                procedure_conf.std_autotuner.max_stddev,
-                importance_ratio=procedure_conf.std_autotuner.importance_ratio
-            )
-            self.primitive_std_autotuner.init(
-                np.log(procedure_conf.std_autotuner.stddev_init),
-                procedure_conf.std_autotuner.reward_init,
-            )
         #   PROCEDURE CONF
         self.evaluation_goals = procedure_conf.evaluation_goals
         self.exploration_goals = procedure_conf.exploration_goals
@@ -167,7 +143,6 @@ class Procedure(object):
         self.updates_per_sample = procedure_conf.updates_per_sample
         self.batch_size = procedure_conf.batch_size
         self.log_freq = procedure_conf.log_freq
-        self.save_std_autotuner_plots = procedure_conf.save_std_autotuner_plots
         self.movement_span = int(procedure_conf.movement_span_in_sec / \
                                  procedure_conf.simulation_timestep)
         self.movement_modes = [
@@ -180,11 +155,6 @@ class Procedure(object):
         self.movement_noise_magnitude_limit = procedure_conf.movement_noise_magnitude_limit
         self.primitive_noise_magnitude_limit = procedure_conf.primitive_noise_magnitude_limit
         self.metabolic_cost_scale = procedure_conf.metabolic_cost_scale
-        self.std_autotuner_filter_size = procedure_conf.std_autotuner.filter_size
-        self.std_importance = procedure_conf.std_autotuner.std_importance
-        self.std_temperature = procedure_conf.std_autotuner.temperature
-        self.std_autotuner_plot_path_movement = './std_autotuner_movement/'
-        self.std_autotuner_plot_path_primitive = './std_autotuner_primitive/'
         self.bottleneck_size = agent_conf.policy_bottleneck_size
         #    HPARAMS
         self._hparams = OrderedDict([
@@ -395,15 +365,11 @@ class Procedure(object):
             "collection/exploration_movement_critic_snr_db", dtype=tf.float32)
         self.tb["collection"]["evaluation"]["movement_critic_snr"] = Mean(
             "collection/evaluation_movement_critic_snr_db", dtype=tf.float32)
-        self.tb["collection"]["exploration"]["movement_stddev"] = Mean(
-            "collection/exploration_movement_stddev", dtype=tf.float32)
         if self.has_movement_primitive:
             self.tb["collection"]["exploration"]["primitive_critic_snr"] = Mean(
                 "collection/exploration_primitive_critic_snr_db", dtype=tf.float32)
             self.tb["collection"]["evaluation"]["primitive_critic_snr"] = Mean(
                 "collection/evaluation_primitive_critic_snr_db", dtype=tf.float32)
-            self.tb["collection"]["exploration"]["primitive_stddev"] = Mean(
-                "collection/exploration_primitive_stddev", dtype=tf.float32)
         #
         self.summary_writer = tf.summary.create_file_writer("logs")
         with self.summary_writer.as_default():
@@ -411,8 +377,6 @@ class Procedure(object):
         # TREE STRUCTURE
         os.makedirs('./replays', exist_ok=True)
         os.makedirs('./visualization_data', exist_ok=True)
-        os.makedirs(self.std_autotuner_plot_path_movement, exist_ok=True)
-        os.makedirs(self.std_autotuner_plot_path_primitive, exist_ok=True)
 
     def dump_buffers(self):
         os.makedirs('./buffers', exist_ok=True)
@@ -891,35 +855,11 @@ class Procedure(object):
             self._train_data_buffer["primitive"]["return_estimates"] = data["primitive_return_estimates"]
             self._train_data_buffer["primitive"]["critic_targets"] = data["primitive_critic_targets"]
         #### COMPUTE CRITIC TARGET DONE!
-        movement_log_stddevs = self.agent.get_movement_log_stddevs()
         # rewards = np.sum(self._train_data_buffer["movement"]["rewards"], axis=(1, 2))
         rewards = np.sum(np.abs(self._train_data_buffer["movement"]["target_return_estimates"] - self._train_data_buffer["movement"]["critic_targets"]), axis=(1, 2))
-        self.movement_std_autotuner.register_rewards(movement_log_stddevs, rewards)
-        movement_log_stddevs = self.movement_std_autotuner.get_log_stddevs(self.std_autotuner_filter_size, self.std_importance, self.std_temperature)
-        movement_stddev = np.exp(movement_log_stddevs[len(movement_log_stddevs) // 2])
-        self.agent.set_movement_log_stddevs(movement_log_stddevs)
-        if self.save_std_autotuner_plots:
-            self.movement_std_autotuner.save_plot(
-                self.std_autotuner_plot_path_movement + '{:07d}.png'.format(self.n_exploration_episodes),
-                self.std_autotuner_filter_size,
-                self.std_importance,
-                movement_log_stddevs,
-            )
         if self.has_movement_primitive:
-            primitive_log_stddevs = self.agent.get_primitive_log_stddevs()
             # rewards = np.sum(self._train_data_buffer["primitive"]["rewards"], axis=(1, 2))
             rewards = np.sum(np.abs(self._train_data_buffer["primitive"]["target_return_estimates"] - self._train_data_buffer["primitive"]["critic_targets"]), axis=-1)
-            self.primitive_std_autotuner.register_rewards(primitive_log_stddevs, rewards)
-            primitive_log_stddevs = self.primitive_std_autotuner.get_log_stddevs(self.std_autotuner_filter_size, self.std_importance, self.std_temperature)
-            primitive_stddev = np.exp(primitive_log_stddevs[len(primitive_log_stddevs) // 2])
-            self.agent.set_primitive_log_stddevs(primitive_log_stddevs)
-            if self.save_std_autotuner_plots:
-                self.primitive_std_autotuner.save_plot(
-                    self.std_autotuner_plot_path_primitive + '{:07d}.png'.format(self.n_exploration_episodes),
-                    self.std_autotuner_filter_size,
-                    self.std_importance,
-                    primitive_log_stddevs,
-                )
         # HINDSIGHT EXPERIENCE
         goals = self._train_data_buffer["movement"]["goals"]
         current_goals = self._train_data_buffer["movement"]["current_goals"]
@@ -1001,8 +941,6 @@ class Procedure(object):
             movement_critic_targets=self._train_data_buffer["movement"]["critic_targets"],
             primitive_return_estimates=None if not self.has_movement_primitive else self._train_data_buffer["primitive"]["target_return_estimates"],
             primitive_critic_targets=None if not self.has_movement_primitive else self._train_data_buffer["primitive"]["critic_targets"],
-            movement_stddev=movement_stddev,
-            primitive_stddev=None if not self.has_movement_primitive else primitive_stddev,
         )
         #### COMPUTE MAX STEP RETURN
         # movement max_step return
@@ -1142,8 +1080,7 @@ class Procedure(object):
     def accumulate_log_data(self, goals, current_goals,
             metabolic_costs, time, exploration,
             movement_return_estimates, movement_critic_targets,
-            primitive_return_estimates=None, primitive_critic_targets=None,
-            movement_stddev=None, primitive_stddev=None):
+            primitive_return_estimates=None, primitive_critic_targets=None):
         if exploration:
             tb = self.tb["collection"]["exploration"]
         else:
@@ -1218,11 +1155,6 @@ class Procedure(object):
             tb["primitive_critic_snr"](np.mean(critic_snr))
         #
         tb["metabolic_cost"](np.mean(metabolic_costs))
-        #
-        if exploration:
-            tb["movement_stddev"](movement_stddev)
-            if self.has_movement_primitive:
-                tb["primitive_stddev"](primitive_stddev)
 
     def get_data(self):
         states, current_goals = tuple(zip(*self.simulation_pool.get_data()))
@@ -1252,52 +1184,53 @@ class Procedure(object):
         return np.array(states), np.array(current_goals), np.array(metabolic_costs), np.array(frames)
 
     def train(self, policy=True, critic=True):
-        data = self.buffer.sample(self.batch_size)
-        if self.has_movement_primitive:
-            movement_critic_states = combine(data["movement"]["states"], data["movement"]["goals"]) # shape [batch_size, n_actions_in_movement, 25 + 4]
-            movement_policy_states = data["primitive"]["movement_policy_input"] # shape [batch_size, primitive_size]
-            movement_losses = self.agent.train_movement(
-                movement_policy_states, # shape [batch_size, primitive_size]
-                movement_critic_states, # shape [batch_size, n_actions_in_movement, 25 + 4]
-                data["movement"]["noisy_actions"], # shape [batch_size, n_actions_in_movement, 7]
-                data["movement"]["critic_targets"], # shape [batch_size, n_actions_in_movement]
-                policy=policy,
-                critic=critic,
-            )
-            primitive_policy_states = combine(data["primitive"]["states"], data["primitive"]["goals"]) # shape [batch_size, 25 + 4]
-            primitive_critic_states = primitive_policy_states.reshape((-1, 1, self.state_size + self.goal_size))
-            primitive_losses = self.agent.train_primitive(
-                primitive_policy_states, # shape [batch_size, 25 + 4]
-                primitive_critic_states, # shape [batch_size, 1, 25 + 4]
-                data["primitive"]["noisy_actions"].reshape((-1, 1, self.primitive_size)), # shape [batch_size, 1, primitive_size]
-                data["primitive"]["critic_targets"].reshape((-1, 1)), # shape [batch_size, 1]
-                policy=policy,
-                critic=critic,
-            )
-        else:
-            movement_critic_states = combine(data["movement"]["states"], data["movement"]["goals"]) # shape [batch_size, n_actions_in_movement, 25 + 4]
-            movement_policy_states = movement_critic_states[:, 0] # shape [batch_size, 25 + 4]
-            movement_losses = self.agent.train_movement(
-                movement_policy_states, # shape [batch_size, 25 + 4]
-                movement_critic_states, # shape [batch_size, n_actions_in_movement, 25 + 4]
-                data["movement"]["noisy_actions"], # shape [batch_size, n_actions_in_movement, 7]
-                data["movement"]["critic_targets"], # shape [batch_size, n_actions_in_movement]
-                policy=policy,
-                critic=critic,
-            )
-        tb = self.tb["training"]
-        if policy:
-            self.n_policy_training += 1
-            tb["movement_policy"]["loss"](movement_losses["policy"])
+        if self.buffer.enough(self.batch_size):
+            data = self.buffer.sample(self.batch_size)
             if self.has_movement_primitive:
-                tb["primitive_policy"]["loss"](primitive_losses["policy"])
-        if critic:
-            self.n_critic_training += 1
-            tb["movement_critic"]["loss"](movement_losses["critic"])
-            if self.has_movement_primitive:
-                tb["primitive_critic"]["loss"](primitive_losses["critic"])
-        self.n_global_training += 1
-        return movement_losses
+                movement_critic_states = combine(data["movement"]["states"], data["movement"]["goals"]) # shape [batch_size, n_actions_in_movement, 25 + 4]
+                movement_policy_states = data["primitive"]["movement_policy_input"] # shape [batch_size, primitive_size]
+                movement_losses = self.agent.train_movement(
+                    movement_policy_states, # shape [batch_size, primitive_size]
+                    movement_critic_states, # shape [batch_size, n_actions_in_movement, 25 + 4]
+                    data["movement"]["noisy_actions"], # shape [batch_size, n_actions_in_movement, 7]
+                    data["movement"]["critic_targets"], # shape [batch_size, n_actions_in_movement]
+                    policy=policy,
+                    critic=critic,
+                )
+                primitive_policy_states = combine(data["primitive"]["states"], data["primitive"]["goals"]) # shape [batch_size, 25 + 4]
+                primitive_critic_states = primitive_policy_states.reshape((-1, 1, self.state_size + self.goal_size))
+                primitive_losses = self.agent.train_primitive(
+                    primitive_policy_states, # shape [batch_size, 25 + 4]
+                    primitive_critic_states, # shape [batch_size, 1, 25 + 4]
+                    data["primitive"]["noisy_actions"].reshape((-1, 1, self.primitive_size)), # shape [batch_size, 1, primitive_size]
+                    data["primitive"]["critic_targets"].reshape((-1, 1)), # shape [batch_size, 1]
+                    policy=policy,
+                    critic=critic,
+                )
+            else:
+                movement_critic_states = combine(data["movement"]["states"], data["movement"]["goals"]) # shape [batch_size, n_actions_in_movement, 25 + 4]
+                movement_policy_states = movement_critic_states[:, 0] # shape [batch_size, 25 + 4]
+                movement_losses = self.agent.train_movement(
+                    movement_policy_states, # shape [batch_size, 25 + 4]
+                    movement_critic_states, # shape [batch_size, n_actions_in_movement, 25 + 4]
+                    data["movement"]["noisy_actions"], # shape [batch_size, n_actions_in_movement, 7]
+                    data["movement"]["critic_targets"], # shape [batch_size, n_actions_in_movement]
+                    policy=policy,
+                    critic=critic,
+                )
+            tb = self.tb["training"]
+            if policy:
+                self.n_policy_training += 1
+                tb["movement_policy"]["loss"](movement_losses["policy"])
+                if self.has_movement_primitive:
+                    tb["primitive_policy"]["loss"](primitive_losses["policy"])
+            if critic:
+                self.n_critic_training += 1
+                tb["movement_critic"]["loss"](movement_losses["critic"])
+                if self.has_movement_primitive:
+                    tb["primitive_critic"]["loss"](primitive_losses["critic"])
+            self.n_global_training += 1
+            return movement_losses
 
     def collect_and_train(self, policy=True, critic=True):
         self.collect_data()

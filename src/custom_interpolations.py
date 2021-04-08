@@ -28,9 +28,9 @@ def get_action_size(movement_mode, n_joints):
         raise ValueError("Movement mode not recognized ({})".format(movement_mode))
 
 
-OmegaConf.register_resolver("get_policy_output_size", get_policy_output_size)
-OmegaConf.register_resolver("get_action_size", get_action_size)
-OmegaConf.register_resolver("slash_to_dot", lambda x: x.replace('/', '.').replace('agent', 'a').replace('experiment', 'e').replace('procedure', 'p')[:235])
-OmegaConf.register_resolver("log", lambda x: np.log(float(x)))
-OmegaConf.register_resolver("sum", lambda x, y: int(x) + int(y))
-OmegaConf.register_resolver("pad_number", lambda x: "{:02d}".format(int(x)))
+OmegaConf.register_new_resolver("get_policy_output_size", get_policy_output_size)
+OmegaConf.register_new_resolver("get_action_size", get_action_size)
+OmegaConf.register_new_resolver("slash_to_dot", lambda x: x.replace('/', '.').replace('agent', 'a').replace('experiment', 'e').replace('procedure', 'p')[:235])
+OmegaConf.register_new_resolver("log", lambda x: np.log(float(x)))
+OmegaConf.register_new_resolver("sum", lambda x, y: int(x) + int(y))
+OmegaConf.register_new_resolver("pad_number", lambda x: "{:02d}".format(int(x)))
