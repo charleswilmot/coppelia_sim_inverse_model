@@ -53,13 +53,21 @@ class TD3(object):
         self.target_critic_model_0.save_weights(path + "/target_critic_model_0")
         self.target_critic_model_1.save_weights(path + "/target_critic_model_1")
 
-    def load_weights(self, path):
-        self.policy_model.load_weights(path + "/policy_model")
-        self.target_policy_model.load_weights(path + "/policy_model")  #, by_name=True, skip_mismatch=True)
-        self.critic_model_0.load_weights(path + "/critic_model_0")
-        self.critic_model_1.load_weights(path + "/critic_model_1")
-        self.target_critic_model_0.load_weights(path + "/target_critic_model_0")
-        self.target_critic_model_1.load_weights(path + "/target_critic_model_1")
+    def load_weights(self, path,
+            policy_model=True, target_policy_model=True, critic_model_0=True,
+            critic_model_1=True, target_critic_model_0=True, target_critic_model_1=True):
+        if policy_model:
+            self.policy_model.load_weights(path + "/policy_model")
+        if target_policy_model:
+            self.target_policy_model.load_weights(path + "/policy_model")
+        if critic_model_0:
+            self.critic_model_0.load_weights(path + "/critic_model_0")
+        if critic_model_1:
+            self.critic_model_1.load_weights(path + "/critic_model_1")
+        if target_critic_model_0:
+            self.target_critic_model_0.load_weights(path + "/target_critic_model_0")
+        if target_critic_model_1:
+            self.target_critic_model_1.load_weights(path + "/target_critic_model_1")
 
     @tf.function
     def get_actions(self, policy_states, target=False, explore=False):

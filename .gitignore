@@ -131,3 +131,5 @@ dmypy.json
 3d_models/blender_files
 experiments/
 tmp/
+databases/
+plots/

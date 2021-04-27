@@ -110,17 +110,30 @@ class Agent(object):
             pure_primitive = pure_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
             noisy_primitive = noisy_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
             noise_primitive = noise_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
-            primitive_passed_to_movement_net = noisy_primitive if noise else pure_primitive
-            pure_movement, noisy_movement, noise_movement = self.movement_td3.get_actions(
-                primitive_passed_to_movement_net, # shape [..., primitive_size]
-                target=target,
-                explore=movement_explore
-            ) # shape [..., n_actions_in_movement, action_size]
-            # pure_movement, noisy_movement, noise_movement = self.get_movement_from_primitive(
-            #     primitive_passed_to_movement_net,
+            # primitive_passed_to_movement_net = noisy_primitive if noise else pure_primitive
+            # pure_movement, noisy_movement, noise_movement = self.movement_td3.get_actions(
+            #     primitive_passed_to_movement_net, # shape [..., primitive_size]
             #     target=target,
             #     explore=movement_explore
-            # )
+            # ) # shape [..., n_actions_in_movement, action_size]
+            if noise:
+                pure_movement, noisy_movement, noise_movement = self.movement_td3.get_actions(
+                    noisy_primitive, # shape [..., primitive_size]
+                    target=target,
+                    explore=movement_explore
+                ) # shape [..., n_actions_in_movement, action_size]
+                pure_movement_pure_primitive, noisy_movement_pure_primitive, noise_movement_pure_primitive = self.movement_td3.get_actions(
+                    pure_primitive, # shape [..., primitive_size]
+                    target=target,
+                    explore=movement_explore
+                ) # shape [..., n_actions_in_movement, action_size]
+                noise_movement = noisy_movement - pure_movement_pure_primitive
+            else:
+                pure_movement, noisy_movement, noise_movement = self.movement_td3.get_actions(
+                    pure_primitive, # shape [..., primitive_size]
+                    target=target,
+                    explore=movement_explore
+                ) # shape [..., n_actions_in_movement, action_size]
             return pure_primitive, noisy_primitive, noise_primitive, pure_movement, noisy_movement, noise_movement
         else:
             raise ValueError("Can not get MPs, Agent has no movement primitive")

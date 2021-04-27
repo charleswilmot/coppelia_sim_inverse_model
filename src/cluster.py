@@ -70,7 +70,7 @@ def get_n_pending_job_per_option():
     return ret
 
 
-def node_list_availability(node_list, min_cpus=8, min_free_mem=30000):
+def node_list_availability(node_list, min_cpus=8, min_free_mem=20000):
     for node in node_list:
         n_free_cpus = get_n_free_cpus(node)
         free_mem = get_free_mem(node)
@@ -109,7 +109,7 @@ def get_partition_reservation():
         else:
             print("there are pending jobs for that option")
     print("no free space")
-    pending_job_target_ratio = {'x-men;(null);PD': 0.25, 'sleuths;(null);PD': 0.7, 'sleuths;triesch-shared;PD': 0.05}
+    pending_job_target_ratio = {'x-men;(null);PD': 0.15, 'sleuths;(null);PD': 0.7, 'sleuths;triesch-shared;PD': 0.15}
     total = sum(n_pending_job_per_option.values())
     if total == 0:
         print("no pending job, sending to x-men")

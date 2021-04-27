@@ -7,7 +7,7 @@ def get_policy_output_size(movement_mode, simulation_timestep, movement_span_in_
     movement_span_in_sec = float(movement_span_in_sec)
     n_joints = int(n_joints)
     if movement_mode in ["full_raw"]:
-        n_actions = int(movement_span_in_sec / simulation_timestep)
+        n_actions = int(np.round(movement_span_in_sec / simulation_timestep))
         policy_output_size = n_actions * n_joints
     elif movement_mode in ["minimalist", "one_raw"]:
         policy_output_size = n_joints
