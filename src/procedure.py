@@ -2,9 +2,11 @@ import numpy as np
 from buffer import Buffer
 from agent import Agent
 from simulation import SimulationPool, MODEL_PATH
+from database import Database
 from tensorflow.keras.metrics import Mean
 import tensorflow as tf
 import time
+from datetime import datetime
 import os
 from visualization import Visualization, visualization_data_type
 from collections import OrderedDict
@@ -12,6 +14,7 @@ from tensorboard.plugins.hparams import api as hp
 from imageio import get_writer
 from utils import appendable_array_file
 from scipy.special import softmax
+from hydra.utils import to_absolute_path
 
 
 def get_snr_db(signal, noise, axis=1):
@@ -133,6 +136,8 @@ class Procedure(object):
         self.one_action_span_in_sec = procedure_conf.simulation_timestep if self.movement_mode == 'full_raw' else procedure_conf.movement_span_in_sec
         if self.has_movement_primitive:
             self.primitive_discount_factor = np.power(self.discount_factor, self.n_actions_in_movement * self.one_action_span_in_sec)
+        else:
+            self.primitive_discount_factor = None
         self.movement_discount_factor = np.power(self.discount_factor, self.one_action_span_in_sec)
         if procedure_conf.overwrite_movement_discount_factor != False:
             self.movement_discount_factor = procedure_conf.overwrite_movement_discount_factor
@@ -143,8 +148,7 @@ class Procedure(object):
         self.updates_per_sample = procedure_conf.updates_per_sample
         self.batch_size = procedure_conf.batch_size
         self.log_freq = procedure_conf.log_freq
-        self.movement_span = int(procedure_conf.movement_span_in_sec / \
-                                 procedure_conf.simulation_timestep)
+        self.movement_span = int(np.round(procedure_conf.movement_span_in_sec / procedure_conf.simulation_timestep))
         self.movement_modes = [
             self.movement_mode for i in range(self.n_simulations)
         ]
@@ -377,6 +381,52 @@ class Procedure(object):
         # TREE STRUCTURE
         os.makedirs('./replays', exist_ok=True)
         os.makedirs('./visualization_data', exist_ok=True)
+        # DATABASE
+        self.database = Database(to_absolute_path('../databases/' + procedure_conf.database))
+        self.experiment_id = self.database.insert_experiment(
+            date_time=datetime.now(),
+            collection=procedure_conf.collection,
+            policy_model_arch=agent_conf.policy_model_arch.config.name,
+            critic_model_arch=agent_conf.critic_model_arch.config.name,
+            policy_primitive_learning_rate=agent_conf.policy_primitive_learning_rate,
+            policy_movement_learning_rate=agent_conf.policy_movement_learning_rate,
+            primitive_exploration_stddev=agent_conf.primitive_exploration_stddev,
+            movement_exploration_stddev=agent_conf.movement_exploration_stddev,
+            critic_learning_rate=agent_conf.critic_learning_rate,
+            target_smoothing_stddev=agent_conf.target_smoothing_stddev,
+            tau=agent_conf.tau,
+            exploration_prob=agent_conf.exploration_prob,
+            state_size=agent_conf.state_size,
+            action_size=agent_conf.action_size,
+            goal_size=agent_conf.goal_size,
+            n_simulations=simulation_conf.n,
+            movement_exploration_prob_ratio=agent_conf.movement_exploration_prob_ratio,
+            policy_bottleneck_size=agent_conf.policy_bottleneck_size,
+            policy_default_layer_size=agent_conf.policy_default_layer_size,
+            critic_default_layer_size=agent_conf.critic_default_layer_size,
+            environement=simulation_conf.environment,
+            has_movement_primitive=int(self.has_movement_primitive),
+            evaluation_goals=procedure_conf.evaluation_goals,
+            exploration_goals=procedure_conf.exploration_goals,
+            episode_length_in_sec=procedure_conf.episode_length_in_sec,
+            episode_length_in_it=self.episode_length,
+            movement_mode=procedure_conf.movement_mode,
+            discount_factor=procedure_conf.discount_factor,
+            movement_discount_factor=self.movement_discount_factor,
+            primitive_discount_factor=self.primitive_discount_factor,
+            n_actions_in_movement=self.n_actions_in_movement,
+            one_action_span_in_sec=self.one_action_span_in_sec,
+            simulation_timestep=procedure_conf.simulation_timestep,
+            updates_per_sample=procedure_conf.updates_per_sample,
+            batch_size=procedure_conf.batch_size,
+            her_max_replays=procedure_conf.her.max_replays,
+            movement_noise_magnitude_limit=procedure_conf.movement_noise_magnitude_limit,
+            primitive_noise_magnitude_limit=procedure_conf.primitive_noise_magnitude_limit,
+            metabolic_cost_scale=procedure_conf.metabolic_cost_scale,
+            buffer_size=buffer_conf.size,
+            path=os.getcwd(),
+            finished=0,
+        )
 
     def dump_buffers(self):
         os.makedirs('./buffers', exist_ok=True)
@@ -385,10 +435,21 @@ class Procedure(object):
 
     def log_metrics(self, key1, key2):
         with self.summary_writer.as_default():
+            data = {}
             for name, metric in self.tb[key1][key2].items():
-                tf.summary.scalar(metric.name + "_wrt_ep", metric.result(), step=self.n_exploration_episodes)
-                tf.summary.scalar(metric.name + "_wrt_tr", metric.result(), step=self.n_global_training)
+                result = metric.result()
+                tf.summary.scalar(metric.name + "_wrt_ep", result, step=self.n_exploration_episodes)
+                tf.summary.scalar(metric.name + "_wrt_tr", result, step=self.n_global_training)
+                data[name] = float(result.numpy())
                 metric.reset_states()
+        if key1 == "collection" and key2 == "evaluation":
+            print(data)
+            self.database.insert_result(
+                experiment_id=self.experiment_id,
+                episode_nb=self.n_exploration_episodes,
+                training_step=self.n_global_training,
+                **data
+            )
 
     def log_summaries(self, exploration=True, evaluation=True, critic=True,
             policy=True):
@@ -439,6 +500,7 @@ class Procedure(object):
         self.close()
 
     def close(self):
+        self.database.register_termination(self.experiment_id)
         self.simulation_pool.close()
 
     def save(self):
@@ -1241,6 +1303,6 @@ class Procedure(object):
         self.collect_and_train(policy=policy, critic=critic)
         if evaluation:
             self.evaluate()
-        if self.n_global_training % self.log_freq == 0:
+        if self.n_evaluation_episodes / self.n_simulations % self.log_freq == 0 and evaluation:
             self.log_summaries(exploration=True, evaluation=evaluation,
                 policy=policy, critic=critic)
