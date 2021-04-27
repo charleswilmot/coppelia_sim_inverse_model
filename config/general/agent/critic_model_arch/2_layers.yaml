@@ -42,5 +42,5 @@ config:
       trainable: true
       units: 1
       use_bias: true
-  name: sequential
+  name: 2_layers
 keras_version: 2.3.0-tf

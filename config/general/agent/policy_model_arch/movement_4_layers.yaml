@@ -83,5 +83,5 @@ config:
       units: ${procedure.policy_output_size}
       use_bias: true
 
-  name: sequential
+  name: movement_4_layers
 keras_version: 2.3.0-tf
