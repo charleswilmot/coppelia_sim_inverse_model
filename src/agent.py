@@ -205,6 +205,8 @@ class Agent(object):
         explore = tf.random.uniform(shape=(self.n_simulations,)) < self.exploration_prob
         if self.has_bottleneck_exploration:
             new_shape = tf.concat([tf.shape(policy_states)[:-1], [-1], [self.movement_td3.action_size]], axis=0)
+            explore_shape_bn = tf.concat([tf.shape(policy_states)[:-1], [1]], axis=0)
+            explore_shape_mvt = tf.concat([tf.shape(policy_states)[:-1], [1, 1]], axis=0)
             who_explores = tf.random.uniform(shape=(self.n_simulations,)) < self.movement_exploration_prob_ratio
             primitive_explore = tf.math.logical_and(tf.math.logical_not(who_explores), explore)
             movement_explore = tf.math.logical_and(who_explores, explore)
@@ -212,12 +214,12 @@ class Agent(object):
             noisy_bn = tf.clip_by_value(bn + tf.random.truncated_normal(
                 shape=tf.shape(bn),
                 stddev=self.primitive_exploration_stddev,
-            ) * tf.cast(tf.reshape(primitive_explore, [-1, 1]), tf.float32), -1, 1)
+            ) * tf.cast(tf.reshape(primitive_explore, explore_shape_bn), tf.float32), -1, 1)
             noisy_out = tf.reshape(self.movement_policy_model_1(noisy_bn), new_shape)
             noisy_out += tf.random.truncated_normal(
                 shape=tf.shape(noisy_out),
                 stddev=self.movement_exploration_stddev,
-            ) * tf.cast(tf.reshape(movement_explore, [-1, 1, 1]), tf.float32)
+            ) * tf.cast(tf.reshape(movement_explore, explore_shape_mvt), tf.float32)
             out = tf.reshape(self.movement_policy_model_1(bn), new_shape)
             noise = noisy_out - out
             return out, noisy_out, noise
