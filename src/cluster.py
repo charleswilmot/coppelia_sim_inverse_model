@@ -147,7 +147,7 @@ def ssh_command(cmd):
     client.connect(host, username=user, password=PASSWORD)
     stdin, stdout, stderr = client.exec_command("""(
         eval "$(/home/wilmot/.software/miniconda/miniconda3/bin/conda shell.bash hook)" ;
-        export COPPELIASIM_ROOT=/home/aecgroup/aecdata/Software/CoppeliaSim_4.0.0_rev4 ;
+        export COPPELIASIM_ROOT=/home/aecgroup/aecdata/Software/CoppeliaSim_Edu_V4_2_0_Ubuntu16_04/ ;
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$COPPELIASIM_ROOT ;
         export QT_QPA_PLATFORM_PLUGIN_PATH=$COPPELIASIM_ROOT ;
         export COPPELIASIM_MODEL_PATH=/home/wilmot/Documents/code/coppelia_sim_inverse_model/3d_models/ ;

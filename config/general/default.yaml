@@ -10,6 +10,12 @@ experiment:
   record_episode_every: 1000000000
   save_every: 250
   final_recording: False # requires gpu
+  restore_checkpoint: false
+  restore_checkpoint_path: ''
+  restore_movement_policy: true
+  restore_movement_critic: true
+  restore_primitive_policy: false
+  restore_primitive_critic: false
   dump_buffers_at:
     - 100000
 
