@@ -1302,8 +1302,9 @@ class Procedure(object):
 
     def collect_and_train(self, policy=True, critic=True):
         self.collect_data()
-        while self.current_training_ratio < self.updates_per_sample:
-            self.train(policy=policy, critic=critic)
+        if self.buffer.enough(self.batch_size):
+            while self.current_training_ratio < self.updates_per_sample:
+                self.train(policy=policy, critic=critic)
 
     def collect_train_and_log(self, policy=True, critic=True, evaluation=False):
         if evaluation:
