@@ -205,8 +205,8 @@ class Agent(object):
         explore = tf.random.uniform(shape=(self.n_simulations,)) < self.exploration_prob
         if self.has_bottleneck_exploration:
             new_shape = tf.concat([tf.shape(policy_states)[:-1], [-1], [self.movement_td3.action_size]], axis=0)
-            explore_shape_bn = tf.concat([tf.shape(policy_states)[:-1], [1]], axis=0)
-            explore_shape_mvt = tf.concat([tf.shape(policy_states)[:-1], [1, 1]], axis=0)
+            explore_shape_bn = tf.concat([[-1], tf.ones(tf.rank(policy_states) - 1)], axis=0)
+            explore_shape_mvt = tf.concat([[-1],tf.ones(tf.rank(policy_states) - 0)], axis=0)
             who_explores = tf.random.uniform(shape=(self.n_simulations,)) < self.movement_exploration_prob_ratio
             primitive_explore = tf.math.logical_and(tf.math.logical_not(who_explores), explore)
             movement_explore = tf.math.logical_and(who_explores, explore)
