@@ -15,10 +15,28 @@ class Agent(object):
             movement_exploration_prob_ratio,
             policy_bottleneck_size, policy_default_layer_size, critic_default_layer_size):
         self.movement_exploration_prob_ratio = movement_exploration_prob_ratio
+        self.primitive_exploration_stddev = primitive_exploration_stddev
+        self.movement_exploration_stddev = movement_exploration_stddev
         full_policy_model = keras.models.model_from_yaml(
             policy_model_arch.pretty(resolve=True),
             custom_objects=custom_objects
         )
+        bottleneck_exploration_indices = [
+            i for i, layer in enumerate(full_policy_model.layers)
+            if isinstance(layer, BottleneckExploration)
+        ]
+        if len(bottleneck_exploration_indices) > 1:
+            raise ValueError("More than 1 BottleneckExploration layer has been found in the policy")
+        if len(bottleneck_exploration_indices) == 1:
+            self.has_bottleneck_exploration = True
+            bottleneck_exploration_index = bottleneck_exploration_indices[0]
+            self.movement_policy_model_0 = keras.models.Sequential(
+                full_policy_model.layers[:bottleneck_exploration_index])
+            self.movement_policy_model_1 = keras.models.Sequential(
+                full_policy_model.layers[bottleneck_exploration_index + 1:])
+            print('#### found bottleneck exploration layer at index ', bottleneck_exploration_index)
+        else:
+            self.has_bottleneck_exploration = False
         primitive_model_end_indices = [
             i for i, layer in enumerate(full_policy_model.layers)
             if isinstance(layer, PrimitiveModelEnd)
@@ -185,7 +203,26 @@ class Agent(object):
     @tf.function
     def get_movement(self, policy_states, target=False):
         explore = tf.random.uniform(shape=(self.n_simulations,)) < self.exploration_prob
-        return self.movement_td3.get_actions(policy_states, target=target, explore=explore)
+        if self.has_bottleneck_exploration:
+            new_shape = tf.concat([tf.shape(policy_states)[:-1], [-1], [self.action_size]], axis=0)
+            who_explores = tf.random.uniform(shape=(self.n_simulations,)) < self.movement_exploration_prob_ratio
+            primitive_explore = tf.math.logical_and(tf.math.logical_not(who_explores), explore)
+            movement_explore = tf.math.logical_and(who_explores, explore)
+            bn = self.movement_policy_model_0(policy_states)
+            noisy_bn = tf.clip_by_value(bn + tf.random.truncated_normal(
+                shape=tf.shape(bn),
+                stddev=self.primitive_exploration_stddev,
+            ) * tf.cast(primitive_explore, tf.float32), -1, 1)
+            noisy_out = tf.reshape(self.movement_policy_model_1(noisy_bn), new_shape)
+            noisy_out += tf.random.truncated_normal(
+                shape=tf.shape(noisy_out),
+                stddev=self.movement_exploration_stddev,
+            ) * tf.cast(movement_explore, tf.float32)
+            out = tf.reshape(self.movement_policy_model_1(bn), new_shape)
+            noise = noisy_out - out
+            return out, noisy_out, noise
+        else:
+            return self.movement_td3.get_actions(policy_states, target=target, explore=explore)
 
     @tf.function
     def get_movement_return_estimates(self, critic_states, movement, target=False):

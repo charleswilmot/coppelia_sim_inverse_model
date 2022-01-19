@@ -12,8 +12,19 @@ class PrimitiveModelEnd(keras.layers.Layer):
         }
 
 
+class BottleneckExploration(keras.layers.Layer):
+    def call(self, inputs):
+        return inputs
+
+    def get_config(self):
+        return {
+            "name": self.name
+        }
+
+
 custom_objects = {
     "PrimitiveModelEnd": PrimitiveModelEnd,
+    "BottleneckExploration": BottleneckExploration,
 }
 
 
