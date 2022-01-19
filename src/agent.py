@@ -217,7 +217,7 @@ class Agent(object):
             noisy_out += tf.random.truncated_normal(
                 shape=tf.shape(noisy_out),
                 stddev=self.movement_exploration_stddev,
-            ) * tf.cast(tf.reshape(movement_explore, [-1, 1]), tf.float32)
+            ) * tf.cast(tf.reshape(movement_explore, [-1, 1, 1]), tf.float32)
             out = tf.reshape(self.movement_policy_model_1(bn), new_shape)
             noise = noisy_out - out
             return out, noisy_out, noise
