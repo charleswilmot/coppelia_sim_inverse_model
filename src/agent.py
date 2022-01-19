@@ -19,7 +19,7 @@ class Agent(object):
         self.primitive_exploration_stddev = primitive_exploration_stddev
         self.movement_exploration_stddev = movement_exploration_stddev
         full_policy_model = keras.models.model_from_yaml(
-            OmegaConf.to_yaml(policy_model_arch),
+            OmegaConf.to_yaml(policy_model_arch, resolve=True),
             custom_objects=custom_objects
         )
         bottleneck_exploration_indices = [
@@ -57,7 +57,7 @@ class Agent(object):
                 policy_model=primitive_policy_model,
                 critic_learning_rate=critic_learning_rate,
                 critic_model=keras.models.model_from_yaml(
-                    OmegaConf.to_yaml(critic_model_arch),
+                    OmegaConf.to_yaml(critic_model_arch, resolve=True),
                     custom_objects=custom_objects
                 ),
                 exploration_stddev=primitive_exploration_stddev,
@@ -73,7 +73,7 @@ class Agent(object):
                 policy_model=movement_policy_model,
                 critic_learning_rate=critic_learning_rate,
                 critic_model=keras.models.model_from_yaml(
-                    OmegaConf.to_yaml(critic_model_arch),
+                    OmegaConf.to_yaml(critic_model_arch, resolve=True),
                     custom_objects=custom_objects
                 ),
                 exploration_stddev=movement_exploration_stddev,
@@ -93,7 +93,7 @@ class Agent(object):
                 policy_model=movement_policy_model,
                 critic_learning_rate=critic_learning_rate,
                 critic_model=keras.models.model_from_yaml(
-                    OmegaConf.to_yaml(critic_model_arch),
+                    OmegaConf.to_yaml(critic_model_arch, resolve=True),
                     custom_objects=custom_objects
                 ),
                 exploration_stddev=movement_exploration_stddev,
