@@ -64,7 +64,7 @@ config:
       use_bias: true
   - class_name: BottleneckExploration
     config:
-      size: ${agent.policy_bottleneck_size}
+      name: bottleneck_exploration
   - class_name: Dense
     config:
       activation: relu
