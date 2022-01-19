@@ -18,7 +18,6 @@ defaults:
   - agent/policy_model_arch: default
   - agent/critic_model_arch: 5_layers
   - procedure: default
-  - procedure/std_autotuner: default
   - simulation: default
 
 

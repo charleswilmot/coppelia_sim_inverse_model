@@ -1,14 +1,15 @@
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
-from custom_layers import custom_objects, NormalNoise
+from custom_layers import custom_objects, PrimitiveModelEnd
 from td3 import TD3
 
 
 class Agent(object):
     def __init__(self,
-            policy_primitive_learning_rate, policy_movement_learning_rate, policy_model_arch,
-            critic_learning_rate, critic_model_arch,
+            policy_primitive_learning_rate, policy_movement_learning_rate,
+            primitive_exploration_stddev, movement_exploration_stddev,
+            policy_model_arch, critic_learning_rate, critic_model_arch,
             target_smoothing_stddev, tau, exploration_prob,
             state_size, action_size, goal_size, n_simulations,
             movement_exploration_prob_ratio,
@@ -18,25 +19,20 @@ class Agent(object):
             policy_model_arch.pretty(resolve=True),
             custom_objects=custom_objects
         )
-        if not isinstance(full_policy_model.layers[-1], NormalNoise):
-            raise ValueError("Last layer of the policy must be of type NormalNoise")
-        noise_layers_indices = [
+        primitive_model_end_indices = [
             i for i, layer in enumerate(full_policy_model.layers)
-            if isinstance(layer, NormalNoise)
+            if isinstance(layer, PrimitiveModelEnd)
         ]
-        if len(noise_layers_indices) > 2:
-            raise ValueError("More than 2 NormalNoise layers have been found in the policy")
-        self.has_movement_primitive = len(noise_layers_indices) == 2
+        if len(primitive_model_end_indices) > 1:
+            raise ValueError("More than 1 PrimitiveModelEnd layer has been found in the policy")
+        self.has_movement_primitive = len(primitive_model_end_indices) == 1
         if self.has_movement_primitive:
+            primitive_model_end_index = primitive_model_end_indices[0]
             primitive_policy_model = keras.models.Sequential(
-                full_policy_model.layers[
-                :noise_layers_indices[0] + 1
-            ])
+                full_policy_model.layers[:primitive_model_end_index])
             movement_policy_model = keras.models.Sequential(
-                full_policy_model.layers[
-                noise_layers_indices[0] + 1:noise_layers_indices[1] + 1
-            ])
-            self.primitive_size = primitive_policy_model.layers[-2].units
+                full_policy_model.layers[primitive_model_end_index + 1:])
+            self.primitive_size = primitive_policy_model.layers[-1].units
             self.primitive_td3 = TD3(
                 policy_learning_rate=policy_primitive_learning_rate,
                 policy_model=primitive_policy_model,
@@ -45,6 +41,7 @@ class Agent(object):
                     critic_model_arch.pretty(resolve=True),
                     custom_objects=custom_objects
                 ),
+                exploration_stddev=primitive_exploration_stddev,
                 target_smoothing_stddev=target_smoothing_stddev,
                 tau=tau,
                 policy_state_size=state_size + goal_size,
@@ -60,6 +57,7 @@ class Agent(object):
                     critic_model_arch.pretty(resolve=True),
                     custom_objects=custom_objects
                 ),
+                exploration_stddev=movement_exploration_stddev,
                 target_smoothing_stddev=target_smoothing_stddev,
                 tau=tau,
                 policy_state_size=self.primitive_size,
@@ -79,6 +77,7 @@ class Agent(object):
                     critic_model_arch.pretty(resolve=True),
                     custom_objects=custom_objects
                 ),
+                exploration_stddev=movement_exploration_stddev,
                 target_smoothing_stddev=target_smoothing_stddev,
                 tau=tau,
                 policy_state_size=state_size + goal_size,
@@ -94,10 +93,34 @@ class Agent(object):
         if self.has_movement_primitive:
             self.primitive_td3.save_weights(path + "/primitive_td3")
 
-    def load_weights(self, path):
-        self.movement_td3.load_weights(path + "/movement_td3")
+    def load_weights(self, path,
+            mvt_policy_model=True, mvt_target_policy_model=True, mvt_critic_model_0=True,
+            mvt_critic_model_1=True, mvt_target_critic_model_0=True, mvt_target_critic_model_1=True,
+            prim_policy_model=True, prim_target_policy_model=True, prim_critic_model_0=True,
+            prim_critic_model_1=True, prim_target_critic_model_0=True, prim_target_critic_model_1=True):
+        d = {
+            "mvt_policy_model": mvt_policy_model,
+            "mvt_target_policy_model": mvt_target_policy_model,
+            "mvt_critic_model_0": mvt_critic_model_0,
+            "mvt_critic_model_1": mvt_critic_model_1,
+            "mvt_target_critic_model_0": mvt_target_critic_model_0,
+            "mvt_target_critic_model_1": mvt_target_critic_model_1,
+            "prim_policy_model": prim_policy_model,
+            "prim_target_policy_model": prim_target_policy_model,
+            "prim_critic_model_0": prim_critic_model_0,
+            "prim_critic_model_1": prim_critic_model_1,
+            "prim_target_critic_model_0": prim_target_critic_model_0,
+            "prim_target_critic_model_1": prim_target_critic_model_1,
+        }
+        which = " ".join([key for key, value in d.items() if value])
+        print("[agent] loading weights ({})".format(which))
+        self.movement_td3.load_weights(path + "/movement_td3",
+            mvt_policy_model, mvt_target_policy_model, mvt_critic_model_0,
+            mvt_critic_model_1, mvt_target_critic_model_0, mvt_target_critic_model_1)
         if self.has_movement_primitive:
-            self.primitive_td3.load_weights(path + "/primitive_td3")
+            self.primitive_td3.load_weights(path + "/primitive_td3",
+                prim_policy_model, prim_target_policy_model, prim_critic_model_0,
+                prim_critic_model_1, prim_target_critic_model_0, prim_target_critic_model_1)
 
     @tf.function
     def get_primitive_and_movement(self, policy_states, target=False, noise=True):
@@ -105,23 +128,36 @@ class Agent(object):
         if self.has_movement_primitive:
             who_explores = tf.random.uniform(shape=(self.n_simulations,)) < self.movement_exploration_prob_ratio
             explore = tf.random.uniform(shape=(self.n_simulations,)) < self.exploration_prob
-            mps_explore = tf.math.logical_and(tf.math.logical_not(who_explores), explore)
+            primitive_explore = tf.math.logical_and(tf.math.logical_not(who_explores), explore)
             movement_explore = tf.math.logical_and(who_explores, explore)
-            pure_primitive, noisy_primitive, noise_primitive = self.primitive_td3.get_actions(policy_states, target=target, explore=mps_explore)
+            pure_primitive, noisy_primitive, noise_primitive = self.primitive_td3.get_actions(policy_states, target=target, explore=primitive_explore)
             pure_primitive = pure_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
             noisy_primitive = noisy_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
             noise_primitive = noise_primitive[..., 0, :] # sequence of ONE primitive --> only one primitive. Resulting shape [batch_size, primitive_size]
-            primitive_passed_to_movement_net = noisy_primitive if noise else pure_primitive
-            pure_movement, noisy_movement, noise_movement = self.movement_td3.get_actions(
-                primitive_passed_to_movement_net, # shape [..., primitive_size]
-                target=target,
-                explore=movement_explore
-            ) # shape [..., n_actions_in_movement, action_size]
-            # pure_movement, noisy_movement, noise_movement = self.get_movement_from_primitive(
-            #     primitive_passed_to_movement_net,
+            # primitive_passed_to_movement_net = noisy_primitive if noise else pure_primitive
+            # pure_movement, noisy_movement, noise_movement = self.movement_td3.get_actions(
+            #     primitive_passed_to_movement_net, # shape [..., primitive_size]
             #     target=target,
             #     explore=movement_explore
-            # )
+            # ) # shape [..., n_actions_in_movement, action_size]
+            if noise:
+                pure_movement, noisy_movement, noise_movement = self.movement_td3.get_actions(
+                    noisy_primitive, # shape [..., primitive_size]
+                    target=target,
+                    explore=movement_explore
+                ) # shape [..., n_actions_in_movement, action_size]
+                pure_movement_pure_primitive, noisy_movement_pure_primitive, noise_movement_pure_primitive = self.movement_td3.get_actions(
+                    pure_primitive, # shape [..., primitive_size]
+                    target=target,
+                    explore=movement_explore
+                ) # shape [..., n_actions_in_movement, action_size]
+                noise_movement = noisy_movement - pure_movement_pure_primitive
+            else:
+                pure_movement, noisy_movement, noise_movement = self.movement_td3.get_actions(
+                    pure_primitive, # shape [..., primitive_size]
+                    target=target,
+                    explore=movement_explore
+                ) # shape [..., n_actions_in_movement, action_size]
             return pure_primitive, noisy_primitive, noise_primitive, pure_movement, noisy_movement, noise_movement
         else:
             raise ValueError("Can not get MPs, Agent has no movement primitive")
@@ -172,15 +208,3 @@ class Agent(object):
             return self.primitive_td3.train(policy_states, critic_states, mps, critic_target, policy=policy, critic=critic)
         else:
             raise ValueError("Can not train MPs, Agent has no movement primitive")
-
-    def set_movement_log_stddevs(self, values):
-        self.movement_td3.set_log_stddevs(values)
-
-    def get_movement_log_stddevs(self):
-        return self.movement_td3.get_log_stddevs()
-
-    def set_primitive_log_stddevs(self, values):
-        self.primitive_td3.set_log_stddevs(values)
-
-    def get_primitive_log_stddevs(self):
-        return self.primitive_td3.get_log_stddevs()

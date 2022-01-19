@@ -1,4 +1,5 @@
 import hydra
+from hydra.utils import to_absolute_path
 import omegaconf
 from procedure import Procedure
 import os
@@ -22,6 +23,14 @@ def experiment(cfg):
     procedure_conf = cfg.procedure
     experiment_conf = cfg.experiment
     with Procedure(agent_conf, buffer_conf, simulation_conf, procedure_conf) as procedure:
+        if experiment_conf.restore_checkpoint:
+            procedure.restore(
+                to_absolute_path(experiment_conf.restore_checkpoint_path),
+                movement_policy=experiment_conf.restore_movement_policy,
+                movement_critic=experiment_conf.restore_movement_critic,
+                primitive_policy=experiment_conf.restore_primitive_policy,
+                primitive_critic=experiment_conf.restore_primitive_critic
+            )
         n_episode_batch = experiment_conf.n_episodes // simulation_conf.n
         for episode_batch in range(n_episode_batch):
             policy = (episode_batch + 1) % experiment_conf.policy_every == 0

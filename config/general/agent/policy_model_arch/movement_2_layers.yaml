@@ -1,5 +1,3 @@
-# @package _group_
-
 backend: tensorflow
 class_name: Sequential
 config:
@@ -44,13 +42,6 @@ config:
       trainable: true
       units: ${procedure.policy_output_size}
       use_bias: true
-  - class_name: NormalNoise
-    config:
-      clip_min: -1  # null
-      clip_max: 1   # null
-      min_log_stddev: ${log:${procedure.std_autotuner.min_stddev}}
-      max_log_stddev: ${log:${procedure.std_autotuner.max_stddev}}
-      n_simulations: ${simulation.n}
 
-  name: sequential
+  name: movement_2_layers
 keras_version: 2.3.0-tf

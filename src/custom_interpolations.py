@@ -7,7 +7,7 @@ def get_policy_output_size(movement_mode, simulation_timestep, movement_span_in_
     movement_span_in_sec = float(movement_span_in_sec)
     n_joints = int(n_joints)
     if movement_mode in ["full_raw"]:
-        n_actions = int(movement_span_in_sec / simulation_timestep)
+        n_actions = int(np.round(movement_span_in_sec / simulation_timestep))
         policy_output_size = n_actions * n_joints
     elif movement_mode in ["minimalist", "one_raw"]:
         policy_output_size = n_joints
@@ -28,9 +28,9 @@ def get_action_size(movement_mode, n_joints):
         raise ValueError("Movement mode not recognized ({})".format(movement_mode))
 
 
-OmegaConf.register_resolver("get_policy_output_size", get_policy_output_size)
-OmegaConf.register_resolver("get_action_size", get_action_size)
-OmegaConf.register_resolver("slash_to_dot", lambda x: x.replace('/', '.').replace('agent', 'a').replace('experiment', 'e').replace('procedure', 'p')[:235])
-OmegaConf.register_resolver("log", lambda x: np.log(float(x)))
-OmegaConf.register_resolver("sum", lambda x, y: int(x) + int(y))
-OmegaConf.register_resolver("pad_number", lambda x: "{:02d}".format(int(x)))
+OmegaConf.register_new_resolver("get_policy_output_size", get_policy_output_size)
+OmegaConf.register_new_resolver("get_action_size", get_action_size)
+OmegaConf.register_new_resolver("slash_to_dot", lambda x: x.replace('/', '.').replace('agent', 'a').replace('experiment', 'e').replace('procedure', 'p')[:235])
+OmegaConf.register_new_resolver("log", lambda x: np.log(float(x)))
+OmegaConf.register_new_resolver("sum", lambda x, y: int(x) + int(y))
+OmegaConf.register_new_resolver("pad_number", lambda x: "{:02d}".format(int(x)))

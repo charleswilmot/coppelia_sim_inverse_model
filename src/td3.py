@@ -15,9 +15,10 @@ def model_copy(model, fake_inp):
 class TD3(object):
     def __init__(self, policy_learning_rate, policy_model,
                        critic_learning_rate, critic_model,
-                       target_smoothing_stddev, tau,
+                       exploration_stddev, target_smoothing_stddev, tau,
                        policy_state_size, critic_state_size, action_size,
                        n_simulations):
+        self.exploration_stddev = exploration_stddev
         self.target_smoothing_stddev = target_smoothing_stddev
         self.tau = tau
         self.action_size = action_size
@@ -31,7 +32,6 @@ class TD3(object):
             dtype=np.float32
         )
         self.target_policy_model = model_copy(self.policy_model, fake_inp)
-        self.noise_layer = self.policy_model.layers[-1]
         self.policy_optimizer = keras.optimizers.Adam(self.policy_learning_rate)
         #   CRITIC
         self.critic_learning_rate = critic_learning_rate
@@ -53,24 +53,31 @@ class TD3(object):
         self.target_critic_model_0.save_weights(path + "/target_critic_model_0")
         self.target_critic_model_1.save_weights(path + "/target_critic_model_1")
 
-    def load_weights(self, path):
-        self.policy_model.load_weights(path + "/policy_model")
-        self.target_policy_model.load_weights(path + "/policy_model")  #, by_name=True, skip_mismatch=True)
-        self.critic_model_0.load_weights(path + "/critic_model_0")
-        self.critic_model_1.load_weights(path + "/critic_model_1")
-        self.target_critic_model_0.load_weights(path + "/target_critic_model_0")
-        self.target_critic_model_1.load_weights(path + "/target_critic_model_1")
+    def load_weights(self, path,
+            policy_model=True, target_policy_model=True, critic_model_0=True,
+            critic_model_1=True, target_critic_model_0=True, target_critic_model_1=True):
+        if policy_model:
+            self.policy_model.load_weights(path + "/policy_model")
+        if target_policy_model:
+            self.target_policy_model.load_weights(path + "/policy_model")
+        if critic_model_0:
+            self.critic_model_0.load_weights(path + "/critic_model_0")
+        if critic_model_1:
+            self.critic_model_1.load_weights(path + "/critic_model_1")
+        if target_critic_model_0:
+            self.target_critic_model_0.load_weights(path + "/target_critic_model_0")
+        if target_critic_model_1:
+            self.target_critic_model_1.load_weights(path + "/target_critic_model_1")
 
     @tf.function
     def get_actions(self, policy_states, target=False, explore=False):
         new_shape = tf.concat([tf.shape(policy_states)[:-1], [-1], [self.action_size]], axis=0)
         if target:
-            stddev = self.target_smoothing_stddev
             pure_actions = self.target_policy_model(policy_states, training=False)
             pure_actions = tf.reshape(pure_actions, new_shape)
             noises = tf.random.truncated_normal(
                 shape=tf.shape(pure_actions),
-                stddev=stddev,
+                stddev=self.target_smoothing_stddev,
             )
             noisy_actions = pure_actions + noises
         elif explore is False:
@@ -79,19 +86,16 @@ class TD3(object):
             noisy_actions = pure_actions
             noises = tf.zeros_like(pure_actions)
         else:
-            self.noise_layer.set_explore(explore)
-            noisy_actions = self.policy_model(policy_states, training=True)
-            noisy_actions = tf.reshape(noisy_actions, new_shape)
-            noises = self.noise_layer.last_noises
-            noises = tf.reshape(noises, new_shape)
-            pure_actions = noisy_actions - noises
+            pure_actions = self.policy_model(policy_states, training=True)
+            pure_actions = tf.reshape(pure_actions, new_shape)
+            noises = tf.random.truncated_normal(
+                shape=tf.shape(pure_actions),
+                stddev=self.exploration_stddev,
+            ) * tf.cast(tf.reshape(explore, (-1, 1, 1)), tf.float32)
+            noisy_actions_non_clipped = pure_actions + noises
+            noisy_actions = tf.clip_by_value(noisy_actions_non_clipped, -1, 1)
+            noises = noisy_actions - pure_actions
         return pure_actions, noisy_actions, noises
-
-    def set_log_stddevs(self, values):
-        self.noise_layer.set_log_stddevs(values)
-
-    def get_log_stddevs(self):
-        return self.noise_layer.log_stddevs.numpy()
 
     @tf.function
     def get_return_estimates(self, critic_states, actions, target=False, mode='mean'):
@@ -123,10 +127,10 @@ class TD3(object):
     @tf.function
     def train_critic(self, critic_states, actions, targets):
         with tf.GradientTape() as tape:
-            estimates_0, estimates_1 = self.get_return_estimates(critic_states, actions, mode='both')
+            estimates_0, estimates_1 = self.get_return_estimates(critic_states, actions, mode='both') # [batch_size, n_actions_in_movement, 1]
             loss_critic = 0.5 * (
-                keras.losses.Huber()(estimates_0, tf.stop_gradient(targets)) +
-                keras.losses.Huber()(estimates_1, tf.stop_gradient(targets))
+                keras.losses.Huber()(estimates_0, tf.stop_gradient(targets)[..., tf.newaxis]) +
+                keras.losses.Huber()(estimates_1, tf.stop_gradient(targets)[..., tf.newaxis])
             )
             vars = self.critic_model_0.variables + self.critic_model_1.variables
             grads = tape.gradient(loss_critic, vars)

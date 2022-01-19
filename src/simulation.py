@@ -133,7 +133,7 @@ class SimulationConsumerAbstract(mp.Process):
         self._pyrep.launch(
             self._scene,
             headless=not self._gui,
-            write_coppeliasim_stdout_to_file=True
+            # write_coppeliasim_stdout_to_file=True
         )
         self._process_io["simulaton_ready"].set()
         self._main_loop()
@@ -508,6 +508,21 @@ class SimulationConsumer(SimulationConsumerAbstract):
         if type == 'one_arm_4_buttons':
             self.add_arm()
             distance = 0.65
+            self.add_button(position=( distance, 0, 0))
+            self.add_button(position=(-distance, 0, 0))
+            self.add_button(position=(0,  distance, 0))
+            self.add_button(position=(0, -distance, 0))
+        elif type == 'one_arm_4_buttons_45':
+            self.add_arm()
+            distance = 0.65
+            sqrt2_2 = 0.7071
+            self.add_button(position=( distance * sqrt2_2,  distance * sqrt2_2, 0))
+            self.add_button(position=(-distance * sqrt2_2, -distance * sqrt2_2, 0))
+            self.add_button(position=(-distance * sqrt2_2,  distance * sqrt2_2, 0))
+            self.add_button(position=( distance * sqrt2_2, -distance * sqrt2_2, 0))
+        elif type == 'one_arm_4_buttons_near':
+            self.add_arm()
+            distance = 0.45
             self.add_button(position=( distance, 0, 0))
             self.add_button(position=(-distance, 0, 0))
             self.add_button(position=(0,  distance, 0))
@@ -1034,6 +1049,32 @@ if __name__ == '__main__':
         simulation.stop_sim()
         simulation.close()
 
+    def take_picture(env_name):
+        simulation = SimulationProducer(
+            scene=MODEL_PATH + '/custom_timestep.ttt',
+            gui=False
+        )
+        simulation.create_environment(env_name)
+        simulation.set_control_loop_enabled(False)
+        simulation.start_sim()
+        cam_id = simulation.add_camera(
+            position=(1.15, 1.35, 1),
+            orientation=(
+                24 * np.pi / 36,
+                -7 * np.pi / 36,
+                 4 * np.pi / 36
+            ),
+            resolution=[1920, 1080]
+        )
+        simulation.step_sim()
+        frame = simulation.get_frame(cam_id)
+        simulation.stop_sim()
+        simulation.close()
+        from PIL import Image
+        Image.fromarray((frame * 255).astype(np.uint8)).save('/tmp/coppeliasim_frame_{}.png'.format(env_name))
+
     # open_one_environment()
-    test_9(mode='minimalist')
-    test_9(mode='full_raw')
+    # test_9(mode='minimalist')
+    # test_9(mode='full_raw')
+    take_picture('one_arm_2_buttons_1_levers_1_tap')
+    take_picture('one_arm_4_buttons')

@@ -2,17 +2,19 @@ import numpy as np
 from buffer import Buffer
 from agent import Agent
 from simulation import SimulationPool, MODEL_PATH
+from database import Database
 from tensorflow.keras.metrics import Mean
 import tensorflow as tf
 import time
+from datetime import datetime
 import os
 from visualization import Visualization, visualization_data_type
 from collections import OrderedDict
 from tensorboard.plugins.hparams import api as hp
 from imageio import get_writer
-from std_autotune import STDAutoTuner
 from utils import appendable_array_file
 from scipy.special import softmax
+from hydra.utils import to_absolute_path
 
 
 def get_snr_db(signal, noise, axis=1):
@@ -123,40 +125,19 @@ class Procedure(object):
         self.agent = Agent(**agent_conf)
         self.has_movement_primitive = self.agent.has_movement_primitive
         self.buffer = Buffer(**buffer_conf)
-        self.movement_std_autotuner = STDAutoTuner(
-            procedure_conf.std_autotuner.length,
-            self.n_simulations,
-            procedure_conf.std_autotuner.min_stddev,
-            procedure_conf.std_autotuner.max_stddev,
-            importance_ratio=procedure_conf.std_autotuner.importance_ratio
-        )
-        self.movement_std_autotuner.init(
-            np.log(procedure_conf.std_autotuner.stddev_init),
-            procedure_conf.std_autotuner.reward_init,
-        )
-        if self.has_movement_primitive:
-            self.primitive_std_autotuner = STDAutoTuner(
-                procedure_conf.std_autotuner.length,
-                self.n_simulations,
-                procedure_conf.std_autotuner.min_stddev,
-                procedure_conf.std_autotuner.max_stddev,
-                importance_ratio=procedure_conf.std_autotuner.importance_ratio
-            )
-            self.primitive_std_autotuner.init(
-                np.log(procedure_conf.std_autotuner.stddev_init),
-                procedure_conf.std_autotuner.reward_init,
-            )
         #   PROCEDURE CONF
         self.evaluation_goals = procedure_conf.evaluation_goals
         self.exploration_goals = procedure_conf.exploration_goals
         self.episode_length_in_sec = procedure_conf.episode_length_in_sec
         self.movement_mode = procedure_conf.movement_mode
-        self.action_size = int(agent_conf.action_size)
+        self.action_size = int(agent_conf.action_size)  # 7
         self.discount_factor = procedure_conf.discount_factor
         self.n_actions_in_movement = int(procedure_conf.policy_output_size) // self.action_size
         self.one_action_span_in_sec = procedure_conf.simulation_timestep if self.movement_mode == 'full_raw' else procedure_conf.movement_span_in_sec
         if self.has_movement_primitive:
             self.primitive_discount_factor = np.power(self.discount_factor, self.n_actions_in_movement * self.one_action_span_in_sec)
+        else:
+            self.primitive_discount_factor = None
         self.movement_discount_factor = np.power(self.discount_factor, self.one_action_span_in_sec)
         if procedure_conf.overwrite_movement_discount_factor != False:
             self.movement_discount_factor = procedure_conf.overwrite_movement_discount_factor
@@ -167,9 +148,7 @@ class Procedure(object):
         self.updates_per_sample = procedure_conf.updates_per_sample
         self.batch_size = procedure_conf.batch_size
         self.log_freq = procedure_conf.log_freq
-        self.save_std_autotuner_plots = procedure_conf.save_std_autotuner_plots
-        self.movement_span = int(procedure_conf.movement_span_in_sec / \
-                                 procedure_conf.simulation_timestep)
+        self.movement_span = int(np.round(procedure_conf.movement_span_in_sec / procedure_conf.simulation_timestep))
         self.movement_modes = [
             self.movement_mode for i in range(self.n_simulations)
         ]
@@ -180,11 +159,6 @@ class Procedure(object):
         self.movement_noise_magnitude_limit = procedure_conf.movement_noise_magnitude_limit
         self.primitive_noise_magnitude_limit = procedure_conf.primitive_noise_magnitude_limit
         self.metabolic_cost_scale = procedure_conf.metabolic_cost_scale
-        self.std_autotuner_filter_size = procedure_conf.std_autotuner.filter_size
-        self.std_importance = procedure_conf.std_autotuner.std_importance
-        self.std_temperature = procedure_conf.std_autotuner.temperature
-        self.std_autotuner_plot_path_movement = './std_autotuner_movement/'
-        self.std_autotuner_plot_path_primitive = './std_autotuner_primitive/'
         self.bottleneck_size = agent_conf.policy_bottleneck_size
         #    HPARAMS
         self._hparams = OrderedDict([
@@ -395,15 +369,11 @@ class Procedure(object):
             "collection/exploration_movement_critic_snr_db", dtype=tf.float32)
         self.tb["collection"]["evaluation"]["movement_critic_snr"] = Mean(
             "collection/evaluation_movement_critic_snr_db", dtype=tf.float32)
-        self.tb["collection"]["exploration"]["movement_stddev"] = Mean(
-            "collection/exploration_movement_stddev", dtype=tf.float32)
         if self.has_movement_primitive:
             self.tb["collection"]["exploration"]["primitive_critic_snr"] = Mean(
                 "collection/exploration_primitive_critic_snr_db", dtype=tf.float32)
             self.tb["collection"]["evaluation"]["primitive_critic_snr"] = Mean(
                 "collection/evaluation_primitive_critic_snr_db", dtype=tf.float32)
-            self.tb["collection"]["exploration"]["primitive_stddev"] = Mean(
-                "collection/exploration_primitive_stddev", dtype=tf.float32)
         #
         self.summary_writer = tf.summary.create_file_writer("logs")
         with self.summary_writer.as_default():
@@ -411,8 +381,52 @@ class Procedure(object):
         # TREE STRUCTURE
         os.makedirs('./replays', exist_ok=True)
         os.makedirs('./visualization_data', exist_ok=True)
-        os.makedirs(self.std_autotuner_plot_path_movement, exist_ok=True)
-        os.makedirs(self.std_autotuner_plot_path_primitive, exist_ok=True)
+        # DATABASE
+        self.database = Database(to_absolute_path('../databases/' + procedure_conf.database))
+        self.experiment_id = self.database.insert_experiment(
+            date_time=datetime.now(),
+            collection=procedure_conf.collection,
+            policy_model_arch=agent_conf.policy_model_arch.config.name,
+            critic_model_arch=agent_conf.critic_model_arch.config.name,
+            policy_primitive_learning_rate=agent_conf.policy_primitive_learning_rate,
+            policy_movement_learning_rate=agent_conf.policy_movement_learning_rate,
+            primitive_exploration_stddev=agent_conf.primitive_exploration_stddev,
+            movement_exploration_stddev=agent_conf.movement_exploration_stddev,
+            critic_learning_rate=agent_conf.critic_learning_rate,
+            target_smoothing_stddev=agent_conf.target_smoothing_stddev,
+            tau=agent_conf.tau,
+            exploration_prob=agent_conf.exploration_prob,
+            state_size=agent_conf.state_size,
+            action_size=agent_conf.action_size,
+            goal_size=agent_conf.goal_size,
+            n_simulations=simulation_conf.n,
+            movement_exploration_prob_ratio=agent_conf.movement_exploration_prob_ratio,
+            policy_bottleneck_size=agent_conf.policy_bottleneck_size,
+            policy_default_layer_size=agent_conf.policy_default_layer_size,
+            critic_default_layer_size=agent_conf.critic_default_layer_size,
+            environement=simulation_conf.environment,
+            has_movement_primitive=int(self.has_movement_primitive),
+            evaluation_goals=procedure_conf.evaluation_goals,
+            exploration_goals=procedure_conf.exploration_goals,
+            episode_length_in_sec=procedure_conf.episode_length_in_sec,
+            episode_length_in_it=self.episode_length,
+            movement_mode=procedure_conf.movement_mode,
+            discount_factor=procedure_conf.discount_factor,
+            movement_discount_factor=self.movement_discount_factor,
+            primitive_discount_factor=self.primitive_discount_factor,
+            n_actions_in_movement=self.n_actions_in_movement,
+            one_action_span_in_sec=self.one_action_span_in_sec,
+            simulation_timestep=procedure_conf.simulation_timestep,
+            updates_per_sample=procedure_conf.updates_per_sample,
+            batch_size=procedure_conf.batch_size,
+            her_max_replays=procedure_conf.her.max_replays,
+            movement_noise_magnitude_limit=procedure_conf.movement_noise_magnitude_limit,
+            primitive_noise_magnitude_limit=procedure_conf.primitive_noise_magnitude_limit,
+            metabolic_cost_scale=procedure_conf.metabolic_cost_scale,
+            buffer_size=buffer_conf.size,
+            path=os.getcwd(),
+            finished=0,
+        )
 
     def dump_buffers(self):
         os.makedirs('./buffers', exist_ok=True)
@@ -421,10 +435,21 @@ class Procedure(object):
 
     def log_metrics(self, key1, key2):
         with self.summary_writer.as_default():
+            data = {}
             for name, metric in self.tb[key1][key2].items():
-                tf.summary.scalar(metric.name + "_wrt_ep", metric.result(), step=self.n_exploration_episodes)
-                tf.summary.scalar(metric.name + "_wrt_tr", metric.result(), step=self.n_global_training)
+                result = metric.result()
+                tf.summary.scalar(metric.name + "_wrt_ep", result, step=self.n_exploration_episodes)
+                tf.summary.scalar(metric.name + "_wrt_tr", result, step=self.n_global_training)
+                data[name] = float(result.numpy())
                 metric.reset_states()
+        if key1 == "collection" and key2 == "evaluation":
+            print(data)
+            self.database.insert_result(
+                experiment_id=self.experiment_id,
+                episode_nb=self.n_exploration_episodes,
+                training_step=self.n_global_training,
+                **data
+            )
 
     def log_summaries(self, exploration=True, evaluation=True, critic=True,
             policy=True):
@@ -475,16 +500,23 @@ class Procedure(object):
         self.close()
 
     def close(self):
+        self.database.register_termination(self.experiment_id)
         self.simulation_pool.close()
 
     def save(self):
         """Saves the model in the appropriate directory"""
-        path = "./checkpoints/{:08d}".format(self.n_global_training)
+        path = "./checkpoints/{:08d}".format(self.n_exploration_episodes)
         self.agent.save_weights(path)
 
-    def restore(self, path):
+    def restore(self, path, movement_policy=True, movement_critic=True, primitive_policy=True, primitive_critic=True):
         """Restores the weights from a checkpoint"""
-        self.agent.load_weights(path)
+        print("[procedure] restoring agent (movement_policy={}, movement_critic={}, primitive_policy={}, primitive_critic={})".format(movement_policy, movement_critic, primitive_policy, primitive_critic))
+        self.agent.load_weights(path,
+            movement_policy, movement_policy, movement_critic,
+            movement_critic, movement_critic, movement_critic,
+            primitive_policy, primitive_policy, primitive_critic,
+            primitive_critic, primitive_critic, primitive_critic
+        )
 
     def binary(self, arr):
         return np.array([list(np.binary_repr(v, width=self.goal_size)) for v in arr], dtype=np.int32)
@@ -554,7 +586,7 @@ class Procedure(object):
             for iteration in range(self.episode_length):
                 if self.has_movement_primitive:
                     pure_primitive, noisy_primitive, noise_primitive, pure_movement, noisy_movement, noise_movement = \
-                        self.agent.get_primitive_and_movement(combine(states, goals))
+                        self.agent.get_primitive_and_movement(combine(states, goals), noise=exploration)
                 else:
                     pure_movement, noisy_movement, noise_movement = self.agent.get_movement(
                         combine(states, goals))
@@ -730,9 +762,9 @@ class Procedure(object):
             )
 
             pure_target_primitive, noisy_target_primitive, _, pure_target_movement, noisy_target_movement, _ = \
-                self.agent.get_primitive_and_movement(first_states_goals_of_sequence, target=True)  # [..., 0, :] --> need only the first state of the sequence (the actual state)
+                self.agent.get_primitive_and_movement(first_states_goals_of_sequence, target=True, noise=False)  # [..., 0, :] --> need only the first state of the sequence (the actual state)
             _, next_noisy_target_primitive, _, _, next_noisy_target_movement, _ = \
-                self.agent.get_primitive_and_movement(last_states_goals, target=True)
+                self.agent.get_primitive_and_movement(last_states_goals, target=True, noise=False)
 
             primitive_target_return_estimates = self.agent.get_primitive_return_estimates(
                     primitive_states_goals, # shape [n_simulations, episode_length, 25 + 4]
@@ -891,35 +923,11 @@ class Procedure(object):
             self._train_data_buffer["primitive"]["return_estimates"] = data["primitive_return_estimates"]
             self._train_data_buffer["primitive"]["critic_targets"] = data["primitive_critic_targets"]
         #### COMPUTE CRITIC TARGET DONE!
-        movement_log_stddevs = self.agent.get_movement_log_stddevs()
         # rewards = np.sum(self._train_data_buffer["movement"]["rewards"], axis=(1, 2))
         rewards = np.sum(np.abs(self._train_data_buffer["movement"]["target_return_estimates"] - self._train_data_buffer["movement"]["critic_targets"]), axis=(1, 2))
-        self.movement_std_autotuner.register_rewards(movement_log_stddevs, rewards)
-        movement_log_stddevs = self.movement_std_autotuner.get_log_stddevs(self.std_autotuner_filter_size, self.std_importance, self.std_temperature)
-        movement_stddev = np.exp(movement_log_stddevs[len(movement_log_stddevs) // 2])
-        self.agent.set_movement_log_stddevs(movement_log_stddevs)
-        if self.save_std_autotuner_plots:
-            self.movement_std_autotuner.save_plot(
-                self.std_autotuner_plot_path_movement + '{:07d}.png'.format(self.n_exploration_episodes),
-                self.std_autotuner_filter_size,
-                self.std_importance,
-                movement_log_stddevs,
-            )
         if self.has_movement_primitive:
-            primitive_log_stddevs = self.agent.get_primitive_log_stddevs()
             # rewards = np.sum(self._train_data_buffer["primitive"]["rewards"], axis=(1, 2))
             rewards = np.sum(np.abs(self._train_data_buffer["primitive"]["target_return_estimates"] - self._train_data_buffer["primitive"]["critic_targets"]), axis=-1)
-            self.primitive_std_autotuner.register_rewards(primitive_log_stddevs, rewards)
-            primitive_log_stddevs = self.primitive_std_autotuner.get_log_stddevs(self.std_autotuner_filter_size, self.std_importance, self.std_temperature)
-            primitive_stddev = np.exp(primitive_log_stddevs[len(primitive_log_stddevs) // 2])
-            self.agent.set_primitive_log_stddevs(primitive_log_stddevs)
-            if self.save_std_autotuner_plots:
-                self.primitive_std_autotuner.save_plot(
-                    self.std_autotuner_plot_path_primitive + '{:07d}.png'.format(self.n_exploration_episodes),
-                    self.std_autotuner_filter_size,
-                    self.std_importance,
-                    primitive_log_stddevs,
-                )
         # HINDSIGHT EXPERIENCE
         goals = self._train_data_buffer["movement"]["goals"]
         current_goals = self._train_data_buffer["movement"]["current_goals"]
@@ -968,21 +976,21 @@ class Procedure(object):
 
                     ### VISUALIZATION DATA FOR HER ###
                     # LOG DATA FOR CUSTOM VISUALIZATION
-                    self._movement_visualization_data_buffer[0]["rewards"] = her_data[0]["movement"]["rewards"].reshape((self.episode_length * self.n_actions_in_movement))
-                    self._movement_visualization_data_buffer[0]["target_return_estimates"] = her_data[0]["movement"]["target_return_estimates"].reshape((self.episode_length * self.n_actions_in_movement))
-                    self._movement_visualization_data_buffer[0]["return_estimates"] = her_data[0]["movement"]["return_estimates"].reshape((self.episode_length * self.n_actions_in_movement))
-                    self._movement_visualization_data_buffer[0]["critic_targets"] = her_data[0]["movement"]["critic_targets"].reshape((self.episode_length * self.n_actions_in_movement))
-                    self._movement_visualization_data_buffer[0]["max_step_returns"] = 0 # not so important
-                    with open("./visualization_data/{}_movement_critic_train_her.dat".format(self.episode_length * self.n_actions_in_movement), 'ab') as f:
-                        f.write(self._movement_visualization_data_buffer[0].tobytes())
-                    if self.has_movement_primitive:
-                        self._primitive_visualization_data_buffer[0]["rewards"] = her_data[0]["primitive"]["rewards"]
-                        self._primitive_visualization_data_buffer[0]["target_return_estimates"] = her_data[0]["primitive"]["target_return_estimates"]
-                        self._primitive_visualization_data_buffer[0]["return_estimates"] = her_data[0]["primitive"]["return_estimates"]
-                        self._primitive_visualization_data_buffer[0]["critic_targets"] = her_data[0]["primitive"]["critic_targets"]
-                        self._primitive_visualization_data_buffer[0]["max_step_returns"] = 0 # not so important
-                        with open("./visualization_data/{}_primitive_critic_train_her.dat".format(self.episode_length), 'ab') as f:
-                            f.write(self._primitive_visualization_data_buffer[0].tobytes())
+                    # self._movement_visualization_data_buffer[0]["rewards"] = her_data[0]["movement"]["rewards"].reshape((self.episode_length * self.n_actions_in_movement))
+                    # self._movement_visualization_data_buffer[0]["target_return_estimates"] = her_data[0]["movement"]["target_return_estimates"].reshape((self.episode_length * self.n_actions_in_movement))
+                    # self._movement_visualization_data_buffer[0]["return_estimates"] = her_data[0]["movement"]["return_estimates"].reshape((self.episode_length * self.n_actions_in_movement))
+                    # self._movement_visualization_data_buffer[0]["critic_targets"] = her_data[0]["movement"]["critic_targets"].reshape((self.episode_length * self.n_actions_in_movement))
+                    # self._movement_visualization_data_buffer[0]["max_step_returns"] = 0 # not so important
+                    # with open("./visualization_data/{}_movement_critic_train_her.dat".format(self.episode_length * self.n_actions_in_movement), 'ab') as f:
+                    #     f.write(self._movement_visualization_data_buffer[0].tobytes())
+                    # if self.has_movement_primitive:
+                    #     self._primitive_visualization_data_buffer[0]["rewards"] = her_data[0]["primitive"]["rewards"]
+                    #     self._primitive_visualization_data_buffer[0]["target_return_estimates"] = her_data[0]["primitive"]["target_return_estimates"]
+                    #     self._primitive_visualization_data_buffer[0]["return_estimates"] = her_data[0]["primitive"]["return_estimates"]
+                    #     self._primitive_visualization_data_buffer[0]["critic_targets"] = her_data[0]["primitive"]["critic_targets"]
+                    #     self._primitive_visualization_data_buffer[0]["max_step_returns"] = 0 # not so important
+                    #     with open("./visualization_data/{}_primitive_critic_train_her.dat".format(self.episode_length), 'ab') as f:
+                    #         f.write(self._primitive_visualization_data_buffer[0].tobytes())
 
         regular_data = self._train_data_buffer.flatten()
         buffer_data = np.concatenate(for_hindsight + [regular_data], axis=0)
@@ -1001,8 +1009,6 @@ class Procedure(object):
             movement_critic_targets=self._train_data_buffer["movement"]["critic_targets"],
             primitive_return_estimates=None if not self.has_movement_primitive else self._train_data_buffer["primitive"]["target_return_estimates"],
             primitive_critic_targets=None if not self.has_movement_primitive else self._train_data_buffer["primitive"]["critic_targets"],
-            movement_stddev=movement_stddev,
-            primitive_stddev=None if not self.has_movement_primitive else primitive_stddev,
         )
         #### COMPUTE MAX STEP RETURN
         # movement max_step return
@@ -1021,25 +1027,25 @@ class Procedure(object):
                 prev = self._evaluation_data_buffer["primitive"][:, it]["max_step_returns"]
         #### COMPUTE MAX STEP RETURN DONE!
         # LOG DATA FOR CUSTOM VISUALIZATION
-        self._movement_visualization_data_buffer["rewards"] = self._train_data_buffer["movement"]["rewards"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
-        self._movement_visualization_data_buffer["target_return_estimates"] = self._train_data_buffer["movement"]["target_return_estimates"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
-        self._movement_visualization_data_buffer["return_estimates"] = self._train_data_buffer["movement"]["return_estimates"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
-        self._movement_visualization_data_buffer["critic_targets"] = self._train_data_buffer["movement"]["critic_targets"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
-        self._movement_visualization_data_buffer["max_step_returns"] = self._evaluation_data_buffer["movement"]["max_step_returns"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
-        with open("./visualization_data/{}_movement_critic_train.dat".format(self.episode_length * self.n_actions_in_movement), 'ab') as f:
-            f.write(self._movement_visualization_data_buffer.tobytes())
-        if self.has_movement_primitive:
-            self._primitive_visualization_data_buffer["rewards"] = self._train_data_buffer["primitive"]["rewards"]
-            self._primitive_visualization_data_buffer["target_return_estimates"] = self._train_data_buffer["primitive"]["target_return_estimates"]
-            self._primitive_visualization_data_buffer["return_estimates"] = self._train_data_buffer["primitive"]["return_estimates"]
-            self._primitive_visualization_data_buffer["critic_targets"] = self._train_data_buffer["primitive"]["critic_targets"]
-            self._primitive_visualization_data_buffer["max_step_returns"] = self._evaluation_data_buffer["primitive"]["max_step_returns"]
-            with open("./visualization_data/{}_primitive_critic_train.dat".format(self.episode_length), 'ab') as f:
-                f.write(self._primitive_visualization_data_buffer.tobytes())
+        # self._movement_visualization_data_buffer["rewards"] = self._train_data_buffer["movement"]["rewards"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
+        # self._movement_visualization_data_buffer["target_return_estimates"] = self._train_data_buffer["movement"]["target_return_estimates"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
+        # self._movement_visualization_data_buffer["return_estimates"] = self._train_data_buffer["movement"]["return_estimates"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
+        # self._movement_visualization_data_buffer["critic_targets"] = self._train_data_buffer["movement"]["critic_targets"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
+        # self._movement_visualization_data_buffer["max_step_returns"] = self._evaluation_data_buffer["movement"]["max_step_returns"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
+        # with open("./visualization_data/{}_movement_critic_train.dat".format(self.episode_length * self.n_actions_in_movement), 'ab') as f:
+        #     f.write(self._movement_visualization_data_buffer.tobytes())
+        # if self.has_movement_primitive:
+        #     self._primitive_visualization_data_buffer["rewards"] = self._train_data_buffer["primitive"]["rewards"]
+        #     self._primitive_visualization_data_buffer["target_return_estimates"] = self._train_data_buffer["primitive"]["target_return_estimates"]
+        #     self._primitive_visualization_data_buffer["return_estimates"] = self._train_data_buffer["primitive"]["return_estimates"]
+        #     self._primitive_visualization_data_buffer["critic_targets"] = self._train_data_buffer["primitive"]["critic_targets"]
+        #     self._primitive_visualization_data_buffer["max_step_returns"] = self._evaluation_data_buffer["primitive"]["max_step_returns"]
+        #     with open("./visualization_data/{}_primitive_critic_train.dat".format(self.episode_length), 'ab') as f:
+        #         f.write(self._primitive_visualization_data_buffer.tobytes())
         self._other_data['goals'] = self._train_data_buffer['movement']['goals'].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement, self.goal_size))
         self._other_data['current_goals'] = self._train_data_buffer['movement']['current_goals'].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement, self.goal_size))
-        with appendable_array_file("./visualization_data/training_goals.dat") as f:
-            f.append(self._other_data)
+        # with appendable_array_file("./visualization_data/training_goals.dat") as f:
+        #     f.append(self._other_data)
 
     def evaluate(self):
         """Performs one episode of evaluation"""
@@ -1050,7 +1056,7 @@ class Procedure(object):
         for iteration in range(self.episode_length):
             if self.has_movement_primitive:
                 pure_primitive, noisy_primitive, noise_primitive, pure_movement, noisy_movement, noise_movement = \
-                    self.agent.get_primitive_and_movement(combine(states, goals))
+                    self.agent.get_primitive_and_movement(combine(states, goals), noise=False)
             else:
                 pure_movement, noisy_movement, noise_movement = self.agent.get_movement(
                     combine(states, goals))
@@ -1119,31 +1125,30 @@ class Procedure(object):
             primitive_critic_targets=None if not self.has_movement_primitive else self._evaluation_data_buffer["primitive"]["critic_targets"],
         )
         # LOG DATA FOR CUSTOM VISUALIZATION
-        self._movement_visualization_data_buffer["rewards"] = self._evaluation_data_buffer["movement"]["rewards"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
-        self._movement_visualization_data_buffer["target_return_estimates"] = self._evaluation_data_buffer["movement"]["target_return_estimates"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
-        self._movement_visualization_data_buffer["return_estimates"] = self._evaluation_data_buffer["movement"]["return_estimates"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
-        self._movement_visualization_data_buffer["critic_targets"] = self._evaluation_data_buffer["movement"]["critic_targets"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
-        self._movement_visualization_data_buffer["max_step_returns"] = self._evaluation_data_buffer["movement"]["max_step_returns"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
-        with open("./visualization_data/{}_movement_critic.dat".format(self.episode_length * self.n_actions_in_movement), 'ab') as f:
-            f.write(self._movement_visualization_data_buffer.tobytes())
-        if self.has_movement_primitive:
-            self._primitive_visualization_data_buffer["rewards"] = self._evaluation_data_buffer["primitive"]["rewards"]
-            self._primitive_visualization_data_buffer["target_return_estimates"] = self._evaluation_data_buffer["primitive"]["target_return_estimates"]
-            self._primitive_visualization_data_buffer["return_estimates"] = self._evaluation_data_buffer["primitive"]["return_estimates"]
-            self._primitive_visualization_data_buffer["critic_targets"] = self._evaluation_data_buffer["primitive"]["critic_targets"]
-            self._primitive_visualization_data_buffer["max_step_returns"] = self._evaluation_data_buffer["primitive"]["max_step_returns"]
-            with open("./visualization_data/{}_primitive_critic.dat".format(self.episode_length), 'ab') as f:
-                f.write(self._primitive_visualization_data_buffer.tobytes())
+        # self._movement_visualization_data_buffer["rewards"] = self._evaluation_data_buffer["movement"]["rewards"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
+        # self._movement_visualization_data_buffer["target_return_estimates"] = self._evaluation_data_buffer["movement"]["target_return_estimates"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
+        # self._movement_visualization_data_buffer["return_estimates"] = self._evaluation_data_buffer["movement"]["return_estimates"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
+        # self._movement_visualization_data_buffer["critic_targets"] = self._evaluation_data_buffer["movement"]["critic_targets"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
+        # self._movement_visualization_data_buffer["max_step_returns"] = self._evaluation_data_buffer["movement"]["max_step_returns"].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement))
+        # with open("./visualization_data/{}_movement_critic.dat".format(self.episode_length * self.n_actions_in_movement), 'ab') as f:
+        #     f.write(self._movement_visualization_data_buffer.tobytes())
+        # if self.has_movement_primitive:
+        #     self._primitive_visualization_data_buffer["rewards"] = self._evaluation_data_buffer["primitive"]["rewards"]
+        #     self._primitive_visualization_data_buffer["target_return_estimates"] = self._evaluation_data_buffer["primitive"]["target_return_estimates"]
+        #     self._primitive_visualization_data_buffer["return_estimates"] = self._evaluation_data_buffer["primitive"]["return_estimates"]
+        #     self._primitive_visualization_data_buffer["critic_targets"] = self._evaluation_data_buffer["primitive"]["critic_targets"]
+        #     self._primitive_visualization_data_buffer["max_step_returns"] = self._evaluation_data_buffer["primitive"]["max_step_returns"]
+        #     with open("./visualization_data/{}_primitive_critic.dat".format(self.episode_length), 'ab') as f:
+        #         f.write(self._primitive_visualization_data_buffer.tobytes())
         self._other_data['goals'] = self._evaluation_data_buffer['movement']['goals'].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement, self.goal_size))
         self._other_data['current_goals'] = self._evaluation_data_buffer['movement']['current_goals'].reshape((self.n_simulations, self.episode_length * self.n_actions_in_movement, self.goal_size))
-        with appendable_array_file("./visualization_data/evaluation_goals.dat") as f:
-            f.append(self._other_data)
+        # with appendable_array_file("./visualization_data/evaluation_goals.dat") as f:
+        #     f.append(self._other_data)
 
     def accumulate_log_data(self, goals, current_goals,
             metabolic_costs, time, exploration,
             movement_return_estimates, movement_critic_targets,
-            primitive_return_estimates=None, primitive_critic_targets=None,
-            movement_stddev=None, primitive_stddev=None):
+            primitive_return_estimates=None, primitive_critic_targets=None):
         if exploration:
             tb = self.tb["collection"]["exploration"]
         else:
@@ -1218,11 +1223,6 @@ class Procedure(object):
             tb["primitive_critic_snr"](np.mean(critic_snr))
         #
         tb["metabolic_cost"](np.mean(metabolic_costs))
-        #
-        if exploration:
-            tb["movement_stddev"](movement_stddev)
-            if self.has_movement_primitive:
-                tb["primitive_stddev"](primitive_stddev)
 
     def get_data(self):
         states, current_goals = tuple(zip(*self.simulation_pool.get_data()))
@@ -1252,52 +1252,53 @@ class Procedure(object):
         return np.array(states), np.array(current_goals), np.array(metabolic_costs), np.array(frames)
 
     def train(self, policy=True, critic=True):
-        data = self.buffer.sample(self.batch_size)
-        if self.has_movement_primitive:
-            movement_critic_states = combine(data["movement"]["states"], data["movement"]["goals"]) # shape [batch_size, n_actions_in_movement, 25 + 4]
-            movement_policy_states = data["primitive"]["movement_policy_input"] # shape [batch_size, primitive_size]
-            movement_losses = self.agent.train_movement(
-                movement_policy_states, # shape [batch_size, primitive_size]
-                movement_critic_states, # shape [batch_size, n_actions_in_movement, 25 + 4]
-                data["movement"]["noisy_actions"], # shape [batch_size, n_actions_in_movement, 7]
-                data["movement"]["critic_targets"], # shape [batch_size, n_actions_in_movement]
-                policy=policy,
-                critic=critic,
-            )
-            primitive_policy_states = combine(data["primitive"]["states"], data["primitive"]["goals"]) # shape [batch_size, 25 + 4]
-            primitive_critic_states = primitive_policy_states.reshape((-1, 1, self.state_size + self.goal_size))
-            primitive_losses = self.agent.train_primitive(
-                primitive_policy_states, # shape [batch_size, 25 + 4]
-                primitive_critic_states, # shape [batch_size, 1, 25 + 4]
-                data["primitive"]["noisy_actions"].reshape((-1, 1, self.primitive_size)), # shape [batch_size, 1, primitive_size]
-                data["primitive"]["critic_targets"].reshape((-1, 1)), # shape [batch_size, 1]
-                policy=policy,
-                critic=critic,
-            )
-        else:
-            movement_critic_states = combine(data["movement"]["states"], data["movement"]["goals"]) # shape [batch_size, n_actions_in_movement, 25 + 4]
-            movement_policy_states = movement_critic_states[:, 0] # shape [batch_size, 25 + 4]
-            movement_losses = self.agent.train_movement(
-                movement_policy_states, # shape [batch_size, 25 + 4]
-                movement_critic_states, # shape [batch_size, n_actions_in_movement, 25 + 4]
-                data["movement"]["noisy_actions"], # shape [batch_size, n_actions_in_movement, 7]
-                data["movement"]["critic_targets"], # shape [batch_size, n_actions_in_movement]
-                policy=policy,
-                critic=critic,
-            )
-        tb = self.tb["training"]
-        if policy:
-            self.n_policy_training += 1
-            tb["movement_policy"]["loss"](movement_losses["policy"])
+        if self.buffer.enough(self.batch_size):
+            data = self.buffer.sample(self.batch_size)
             if self.has_movement_primitive:
-                tb["primitive_policy"]["loss"](primitive_losses["policy"])
-        if critic:
-            self.n_critic_training += 1
-            tb["movement_critic"]["loss"](movement_losses["critic"])
-            if self.has_movement_primitive:
-                tb["primitive_critic"]["loss"](primitive_losses["critic"])
-        self.n_global_training += 1
-        return movement_losses
+                movement_critic_states = combine(data["movement"]["states"], data["movement"]["goals"]) # shape [batch_size, n_actions_in_movement, 25 + 4]
+                movement_policy_states = data["primitive"]["movement_policy_input"] # shape [batch_size, primitive_size]
+                movement_losses = self.agent.train_movement(
+                    movement_policy_states, # shape [batch_size, primitive_size]
+                    movement_critic_states, # shape [batch_size, n_actions_in_movement, 25 + 4]
+                    data["movement"]["noisy_actions"], # shape [batch_size, n_actions_in_movement, 7]
+                    data["movement"]["critic_targets"], # shape [batch_size, n_actions_in_movement]
+                    policy=policy,
+                    critic=critic,
+                )
+                primitive_policy_states = combine(data["primitive"]["states"], data["primitive"]["goals"]) # shape [batch_size, 25 + 4]
+                primitive_critic_states = primitive_policy_states.reshape((-1, 1, self.state_size + self.goal_size))
+                primitive_losses = self.agent.train_primitive(
+                    primitive_policy_states, # shape [batch_size, 25 + 4]
+                    primitive_critic_states, # shape [batch_size, 1, 25 + 4]
+                    data["primitive"]["noisy_actions"].reshape((-1, 1, self.primitive_size)), # shape [batch_size, 1, primitive_size]
+                    data["primitive"]["critic_targets"].reshape((-1, 1)), # shape [batch_size, 1]
+                    policy=policy,
+                    critic=critic,
+                )
+            else:
+                movement_critic_states = combine(data["movement"]["states"], data["movement"]["goals"]) # shape [batch_size, n_actions_in_movement, 25 + 4]
+                movement_policy_states = movement_critic_states[:, 0] # shape [batch_size, 25 + 4]
+                movement_losses = self.agent.train_movement(
+                    movement_policy_states, # shape [batch_size, 25 + 4]
+                    movement_critic_states, # shape [batch_size, n_actions_in_movement, 25 + 4]
+                    data["movement"]["noisy_actions"], # shape [batch_size, n_actions_in_movement, 7]
+                    data["movement"]["critic_targets"], # shape [batch_size, n_actions_in_movement]
+                    policy=policy,
+                    critic=critic,
+                )
+            tb = self.tb["training"]
+            if policy:
+                self.n_policy_training += 1
+                tb["movement_policy"]["loss"](movement_losses["policy"])
+                if self.has_movement_primitive:
+                    tb["primitive_policy"]["loss"](primitive_losses["policy"])
+            if critic:
+                self.n_critic_training += 1
+                tb["movement_critic"]["loss"](movement_losses["critic"])
+                if self.has_movement_primitive:
+                    tb["primitive_critic"]["loss"](primitive_losses["critic"])
+            self.n_global_training += 1
+            return movement_losses
 
     def collect_and_train(self, policy=True, critic=True):
         self.collect_data()
@@ -1305,9 +1306,9 @@ class Procedure(object):
             self.train(policy=policy, critic=critic)
 
     def collect_train_and_log(self, policy=True, critic=True, evaluation=False):
-        self.collect_and_train(policy=policy, critic=critic)
         if evaluation:
             self.evaluate()
-        if self.n_global_training % self.log_freq == 0:
+        self.collect_and_train(policy=policy, critic=critic)
+        if self.n_evaluation_episodes / self.n_simulations % self.log_freq == 0 and evaluation:
             self.log_summaries(exploration=True, evaluation=evaluation,
                 policy=policy, critic=critic)

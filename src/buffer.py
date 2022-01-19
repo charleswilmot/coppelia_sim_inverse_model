@@ -60,3 +60,6 @@ class Buffer(object):
             part2 = self.buffer[:batch_last - self.current_last]
             self.sample_index = batch_last - self.current_last
             return np.concatenate((part1, part2))
+
+    def enough(self, n):
+        return self.current_last >= n
