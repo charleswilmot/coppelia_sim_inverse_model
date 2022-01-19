@@ -613,7 +613,30 @@ experiments = [
 
 
 # for i in range(5):
-run_experiment(delay='now', **experiments[0])
+# run_experiment(delay='now', **experiments[0])
+
+for i in [2, 4]:
+    run_experiment(delay=i,
+        **{ # missing vary bottleneck size
+            "procedure.database":"thesis_experiments_v4.db",
+            "experiment.repetition":"0,1,2,3,4",
+            "procedure.her.max_replays":"0",
+            # "procedure.movement_noise_magnitude_limit":"0.5",
+            "procedure.movement_noise_magnitude_limit":"0.01",
+            "agent.tau":"0.01",
+            "procedure.collection":"trajectory_bn_exploration",
+            "agent/policy_model_arch":"movement_3_3_BN_exploration",
+            "agent.policy_bottleneck_size":"5",
+            "procedure.movement_mode":"full_raw",
+            "procedure.movement_span_in_sec":"1.0",
+            "experiment.n_episodes":"100000",
+            "agent.exploration_prob":"0.1",
+            "agent.movement_exploration_stddev":"0.5",
+            "agent.primitive_exploration_stddev":"0.2",
+            "agent.movement_exploration_prob_ratio":"0.0,0.2,0.5,0.8,1.0",
+        }
+    )
+
 
 # run_experiment(delay=1, **experiments[1])
 # run_experiment(delay=3, **experiments[2])
