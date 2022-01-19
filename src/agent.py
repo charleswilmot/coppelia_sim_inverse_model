@@ -93,10 +93,34 @@ class Agent(object):
         if self.has_movement_primitive:
             self.primitive_td3.save_weights(path + "/primitive_td3")
 
-    def load_weights(self, path):
-        self.movement_td3.load_weights(path + "/movement_td3")
+    def load_weights(self, path,
+            mvt_policy_model=True, mvt_target_policy_model=True, mvt_critic_model_0=True,
+            mvt_critic_model_1=True, mvt_target_critic_model_0=True, mvt_target_critic_model_1=True,
+            prim_policy_model=True, prim_target_policy_model=True, prim_critic_model_0=True,
+            prim_critic_model_1=True, prim_target_critic_model_0=True, prim_target_critic_model_1=True):
+        d = {
+            "mvt_policy_model": mvt_policy_model,
+            "mvt_target_policy_model": mvt_target_policy_model,
+            "mvt_critic_model_0": mvt_critic_model_0,
+            "mvt_critic_model_1": mvt_critic_model_1,
+            "mvt_target_critic_model_0": mvt_target_critic_model_0,
+            "mvt_target_critic_model_1": mvt_target_critic_model_1,
+            "prim_policy_model": prim_policy_model,
+            "prim_target_policy_model": prim_target_policy_model,
+            "prim_critic_model_0": prim_critic_model_0,
+            "prim_critic_model_1": prim_critic_model_1,
+            "prim_target_critic_model_0": prim_target_critic_model_0,
+            "prim_target_critic_model_1": prim_target_critic_model_1,
+        }
+        which = " ".join([key for key, value in d.items() if value])
+        print("[agent] loading weights ({})".format(which))
+        self.movement_td3.load_weights(path + "/movement_td3",
+            mvt_policy_model, mvt_target_policy_model, mvt_critic_model_0,
+            mvt_critic_model_1, mvt_target_critic_model_0, mvt_target_critic_model_1)
         if self.has_movement_primitive:
-            self.primitive_td3.load_weights(path + "/primitive_td3")
+            self.primitive_td3.load_weights(path + "/primitive_td3",
+                prim_policy_model, prim_target_policy_model, prim_critic_model_0,
+                prim_critic_model_1, prim_target_critic_model_0, prim_target_critic_model_1)
 
     @tf.function
     def get_primitive_and_movement(self, policy_states, target=False, noise=True):

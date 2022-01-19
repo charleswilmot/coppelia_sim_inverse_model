@@ -5,7 +5,7 @@ from datetime import datetime
 
 class Database:
     def __init__(self, path):
-        print('opening database at {}'.format(path))
+        print('[database] opening {}'.format(path))
         self.path = path
         self.conn = sql.connect(path, detect_types=sql.PARSE_DECLTYPES)
         self.cursor = self.conn.cursor()
@@ -263,32 +263,100 @@ class Database:
         self.commit()
 
     def delete_exp(self, experiment_id):
+        print(f'[database] deleting experiment with id {experiment_id}')
         command = 'DELETE FROM experiments WHERE experiment_id=?'
         self.cursor.execute(command, (experiment_id,))
         command = 'DELETE FROM results WHERE experiment_id=?'
         self.cursor.execute(command, (experiment_id,))
         self.commit()
 
+    def delete_collection(self, collection):
+        print(f'[database] deleting collection {collection}')
+        ids = self.get_experiment_ids(collection=collection)
+        for ex_id in ids:
+            self.delete_exp(ex_id)
+
     def get_dataframe(self, command):
         return pd.read_sql(command, self.conn)
 
     def get_experiment_ids(self, **kwargs):
-        where = tuple("{}='{}'".format(key, value) for key, value in kwargs.items())
+        where = tuple(f"{key} IS NULL" if value is None else f"{key}='{value}'" for key, value in kwargs.items())
         where = ' AND\n            '.join(where)
         command = '''
         SELECT
             experiment_id,
             finished
         FROM
-            experiments
+            experiments''' + (f'''
         WHERE
-            {}
-        '''.format(where)
+            {where}
+        ''' if kwargs else '')
         self.cursor.execute(command)
         results = self.cursor.fetchall()
         ret = tuple(map(lambda x: x[0], results))
         # print(kwargs, len(ret), tuple(map(lambda x: x[1], results)))
         return ret
+
+    def get_matching_experiments_ids(self, other_database, experiment_id):
+        command = f'''
+        SELECT
+            policy_model_arch,
+            critic_model_arch,
+            policy_primitive_learning_rate,
+            policy_movement_learning_rate,
+            primitive_exploration_stddev,
+            movement_exploration_stddev,
+            critic_learning_rate,
+            target_smoothing_stddev,
+            tau,
+            exploration_prob,
+            state_size,
+            action_size,
+            goal_size,
+            movement_exploration_prob_ratio,
+            policy_bottleneck_size,
+            policy_default_layer_size,
+            critic_default_layer_size,
+            environement,
+            has_movement_primitive,
+            evaluation_goals,
+            exploration_goals,
+            episode_length_in_sec,
+            /*episode_length_in_it,*/
+            movement_mode,
+            discount_factor,
+            movement_discount_factor,
+            primitive_discount_factor,
+            n_actions_in_movement,
+            one_action_span_in_sec,
+            simulation_timestep,
+            updates_per_sample,
+            batch_size,
+            her_max_replays,
+            movement_noise_magnitude_limit,
+            primitive_noise_magnitude_limit,
+            metabolic_cost_scale,
+            buffer_size
+        FROM
+            experiments
+        WHERE
+            experiment_id='{experiment_id}'
+        '''
+        df = self.get_dataframe(command) #.fillna("missing")
+        where = df.to_dict(orient='records')[0]
+        experiment_ids = other_database.get_experiment_ids(**where)
+        return experiment_ids
+
+    def group_by_matching_experiments(self):
+        experiment_ids = set(self.get_experiment_ids())
+        groups = []
+        while experiment_ids:
+            experiment_id = experiment_ids.pop()
+            matchings = self.get_matching_experiments_ids(self, experiment_id)
+            groups.append(matchings)
+            for matching in matchings:
+                experiment_ids.discard(matching)
+        return groups
 
     def get_collection_variation_parameters(self, collection):
         command = '''
@@ -337,14 +405,75 @@ class Database:
         '''.format(collection)
         df = self.get_dataframe(command).fillna("missing")
         df = df.loc[:, (df != df.iloc[0]).any()]
-        frame = df.value_counts(sort=False).index.to_frame(index=False)
-        return frame.sort_values(by=list(frame.columns))
+        if len(df.columns) > 0:
+            frame = df.value_counts(sort=False).index.to_frame(index=False)
+            return frame.sort_values(by=list(frame.columns))
+        else:
+            return pd.DataFrame({
+                "date_time":
+                [
+                    self.get_experiment_field(experiment_id, "date_time")
+                    for experiment_id in self.get_experiment_ids(collection=collection)
+                ]
+            })
         # # self.cursor.execute(command, (collection,))
         # # results = self.cursor.fetchall()
         #
         # results_unique = sorted(list(set(results)))
         # print('results_unique', results_unique)
         # transposed = list(zip(*results_unique))
+
+    def get_experiment_field(self, experiment_id, field):
+        df = self.get_dataframe(f"SELECT {field} FROM experiments WHERE experiment_id='{experiment_id}'")
+        return df[field].values[0]
+
+    def import_from_other_db(self, database, experiment_id, collection):
+        command = 'SELECT * FROM experiments WHERE experiment_id=?'
+        database.cursor.execute(command, (experiment_id,))
+        res = database.cursor.fetchone()
+        # print(f'found {res} in the other db')
+        new_experiment_id = self.insert_experiment(datetime.now(), collection, *res[3:])
+        # print(f'it will have the id {new_experiment_id} in this db')
+        command = '''
+        SELECT
+            ?,
+            episode_nb,
+            training_step,
+            it_per_sec,
+            success_rate_percent,
+            time_to_solve,
+            diversity_per_ep,
+            delta_distance_to_goal,
+            n_register_change,
+            one_away_sucess_rate,
+            metabolic_cost,
+            movement_critic_snr,
+            primitive_critic_snr
+        FROM
+            results
+        WHERE
+            experiment_id=?
+        '''
+        database.cursor.execute(command, (new_experiment_id, experiment_id))
+        for row in database.cursor:
+            # print(f'inserting row {row}')
+            self.cursor.execute('INSERT INTO results VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', row)
+        self.commit()
+        print(f"[database] imported experiment {experiment_id} from {database.path} to {self.path} in collection {collection} -- new experiment_id {new_experiment_id}")
+        return new_experiment_id
+
+    def get_experiment_last_episode_nb(self, experiment_id):
+        command = f'''
+        SELECT
+            MAX(episode_nb)
+        FROM
+            results
+        WHERE
+            experiment_id='{experiment_id}'
+        '''
+        self.cursor.execute(command)
+        res = self.cursor.fetchone()
+        return res[0]
 
     def copy_to_new_collection(self, experiment_id, collection):
         command = 'SELECT * FROM experiments WHERE experiment_id=?'

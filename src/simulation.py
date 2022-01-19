@@ -133,7 +133,7 @@ class SimulationConsumerAbstract(mp.Process):
         self._pyrep.launch(
             self._scene,
             headless=not self._gui,
-            write_coppeliasim_stdout_to_file=True
+            # write_coppeliasim_stdout_to_file=True
         )
         self._process_io["simulaton_ready"].set()
         self._main_loop()
@@ -508,6 +508,21 @@ class SimulationConsumer(SimulationConsumerAbstract):
         if type == 'one_arm_4_buttons':
             self.add_arm()
             distance = 0.65
+            self.add_button(position=( distance, 0, 0))
+            self.add_button(position=(-distance, 0, 0))
+            self.add_button(position=(0,  distance, 0))
+            self.add_button(position=(0, -distance, 0))
+        elif type == 'one_arm_4_buttons_45':
+            self.add_arm()
+            distance = 0.65
+            sqrt2_2 = 0.7071
+            self.add_button(position=( distance * sqrt2_2,  distance * sqrt2_2, 0))
+            self.add_button(position=(-distance * sqrt2_2, -distance * sqrt2_2, 0))
+            self.add_button(position=(-distance * sqrt2_2,  distance * sqrt2_2, 0))
+            self.add_button(position=( distance * sqrt2_2, -distance * sqrt2_2, 0))
+        elif type == 'one_arm_4_buttons_near':
+            self.add_arm()
+            distance = 0.45
             self.add_button(position=( distance, 0, 0))
             self.add_button(position=(-distance, 0, 0))
             self.add_button(position=(0,  distance, 0))
