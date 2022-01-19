@@ -212,12 +212,12 @@ class Agent(object):
             noisy_bn = tf.clip_by_value(bn + tf.random.truncated_normal(
                 shape=tf.shape(bn),
                 stddev=self.primitive_exploration_stddev,
-            ) * tf.cast(primitive_explore, tf.float32), -1, 1)
+            ) * tf.cast(tf.reshape(primitive_explore, [-1, 1]), tf.float32), -1, 1)
             noisy_out = tf.reshape(self.movement_policy_model_1(noisy_bn), new_shape)
             noisy_out += tf.random.truncated_normal(
                 shape=tf.shape(noisy_out),
                 stddev=self.movement_exploration_stddev,
-            ) * tf.cast(movement_explore, tf.float32)
+            ) * tf.cast(tf.reshape(movement_explore, [-1, 1]), tf.float32)
             out = tf.reshape(self.movement_policy_model_1(bn), new_shape)
             noise = noisy_out - out
             return out, noisy_out, noise
